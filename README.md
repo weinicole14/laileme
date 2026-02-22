@@ -145,7 +145,6 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
 ## 📝 注意事项
 
 ⚠️ **关于 Android SDK**  
-- 此模板可以在 Operit 的 Ubuntu 环境中构建
 - 完整编译需要安装 Android SDK
 - 推荐使用 Android Studio 进行完整开发
 
@@ -207,5 +206,6 @@ find ~/.gradle/caches/transforms-4 -name "aapt2" -type f -exec cp $ANDROID_SDK/b
 - 修改 `gradle.properties` 可以调整构建性能
 
 Happy Coding! 🤖✨
+
 
 
