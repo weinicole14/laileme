@@ -1,4 +1,4 @@
-# Operit Android 项目
+# Android 项目
 
 这是一个基于 **Jetpack Compose** 的现代化 Android 应用开发模板。
 
@@ -216,3 +216,4 @@ find ~/.gradle/caches/transforms-4 -name "aapt2" -type f -exec cp $ANDROID_SDK/b
 - 修改 `gradle.properties` 可以调整构建性能
 
 Happy Coding! 🤖✨
+
