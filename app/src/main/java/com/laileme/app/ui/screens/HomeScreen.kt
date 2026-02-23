@@ -29,6 +29,7 @@ import com.laileme.app.R
 import com.laileme.app.ui.PeriodUiState
 import com.laileme.app.ui.normalizeDate
 import com.laileme.app.ui.components.BunnyMascotLying
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.laileme.app.ui.theme.*
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -87,11 +88,17 @@ fun HomeScreen(
             .padding(bottom = 60.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(8.dp))
+        // 顶部栏：工具栏 + 小兔子
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HomeToolBar()
+            BunnyMascotLying(modifier = Modifier.size(72.dp, 50.dp))
+        }
 
-        BunnyMascotLying(modifier = Modifier.size(72.dp, 50.dp))
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // 月亮背景 + 圆环
         Box(
@@ -609,6 +616,45 @@ private fun CycleRing(uiState: PeriodUiState) {
             drawCircle(Color.White, 8.dp.toPx(), Offset(ix, iy))
             drawCircle(ringColor, 5.dp.toPx(), Offset(ix, iy))
         }
+    }
+}
+
+@Composable
+private fun HomeToolBar() {
+    Surface(
+        modifier = Modifier.padding(top = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HomeToolBarIcon(Icons.Outlined.Menu, false)
+            HomeToolBarIcon(Icons.Outlined.CalendarMonth, false)
+            HomeToolBarIcon(Icons.Outlined.DarkMode, false)
+            HomeToolBarIcon(Icons.Outlined.ChatBubbleOutline, false)
+        }
+    }
+}
+
+@Composable
+private fun HomeToolBarIcon(icon: ImageVector, isSelected: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isSelected) AccentOrange.copy(alpha = 0.2f) else Color.Transparent)
+            .clickable { },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = if (isSelected) AccentOrange else TextSecondary
+        )
     }
 }
 

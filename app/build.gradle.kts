@@ -13,7 +13,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "beta1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -80,6 +80,14 @@ dependencies {
     
     // ViewModel
     implementation(libs.lifecycle.viewmodel.compose)
+    
+    // WorkManager (定时通知)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    
+    // Retrofit 网络请求
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

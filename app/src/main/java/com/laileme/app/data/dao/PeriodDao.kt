@@ -23,6 +23,10 @@ interface PeriodDao {
     @Query("SELECT * FROM period_records WHERE endDate IS NOT NULL ORDER BY startDate DESC LIMIT 1")
     suspend fun getLatestCompletedRecord(): PeriodRecord?
 
+    /** 获取所有记录（suspend版本，用于同步） */
+    @Query("SELECT * FROM period_records ORDER BY startDate DESC")
+    suspend fun getAllList(): List<PeriodRecord>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(record: PeriodRecord): Long
 

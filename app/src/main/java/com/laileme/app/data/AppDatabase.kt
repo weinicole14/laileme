@@ -6,13 +6,16 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.laileme.app.data.dao.DiaryDao
 import com.laileme.app.data.dao.PeriodDao
+import com.laileme.app.data.dao.SleepDao
 import com.laileme.app.data.entity.DiaryEntry
 import com.laileme.app.data.entity.PeriodRecord
+import com.laileme.app.data.entity.SleepRecord
 
-@Database(entities = [PeriodRecord::class, DiaryEntry::class], version = 7, exportSchema = false)
+@Database(entities = [PeriodRecord::class, DiaryEntry::class, SleepRecord::class], version = 9, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun periodDao(): PeriodDao
     abstract fun diaryDao(): DiaryDao
+    abstract fun sleepDao(): SleepDao
 
     companion object {
         @Volatile

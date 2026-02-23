@@ -356,14 +356,14 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
 
     // ─────────────── 日记操作 ───────────────
 
-    fun saveDiary(date: Long, mood: String, symptoms: String, notes: String) {
+    fun saveDiary(entry: DiaryEntry) {
         viewModelScope.launch {
-            val normalizedDate = normalizeDate(date)
+            val normalizedDate = normalizeDate(entry.date)
             val existing = diaryDao.getEntryByDateOnce(normalizedDate)
             if (existing != null) {
-                diaryDao.update(existing.copy(mood = mood, symptoms = symptoms, notes = notes))
+                diaryDao.update(entry.copy(id = existing.id, date = normalizedDate))
             } else {
-                diaryDao.insert(DiaryEntry(date = normalizedDate, mood = mood, symptoms = symptoms, notes = notes))
+                diaryDao.insert(entry.copy(date = normalizedDate))
             }
         }
     }

@@ -40,6 +40,7 @@ fun LailemeTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = LailemeTypography,
         content = content
     )
 }

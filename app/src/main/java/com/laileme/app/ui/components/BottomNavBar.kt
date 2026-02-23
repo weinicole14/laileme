@@ -29,8 +29,9 @@ import com.laileme.app.ui.theme.*
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("首页", Icons.Outlined.Home),
     CALENDAR("日历", Icons.Outlined.CalendarMonth),
+    DIARY("记录", Icons.Outlined.EditNote),
     STATS("统计", Icons.Outlined.BarChart),
-    DISCOVER("发现", Icons.Outlined.Search),
+    DISCOVER("发现", Icons.Outlined.Explore),
     PROFILE("我", Icons.Outlined.PersonOutline)
 }
 
@@ -46,12 +47,12 @@ fun BottomNavBar(
             .navigationBarsPadding()
             .shadow(4.dp, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        color = Color.White
+        color = CardBackground
     ) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp, horizontal = 4.dp)
+                .padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp)
         ) {
             val itemCount = NavItem.entries.size
             val itemWidth = maxWidth / itemCount
@@ -67,7 +68,7 @@ fun BottomNavBar(
             // 底部指示条
             Box(
                 modifier = Modifier
-                    .offset(x = indicatorOffset)
+                    .offset(x = indicatorOffset, y = (-1).dp)
                     .width(36.dp)
                     .height(3.dp)
                     .clip(RoundedCornerShape(2.dp))
@@ -76,7 +77,9 @@ fun BottomNavBar(
             )
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NavItem.entries.forEach { item ->

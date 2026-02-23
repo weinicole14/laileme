@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.laileme.app.data.entity.DiaryEntry
@@ -49,8 +50,7 @@ fun CalendarScreen(
     onAddPeriod: (Long) -> Unit,
     onEndPeriod: (Long) -> Unit,
     onDateSelected: (Long) -> Unit,
-    onMonthChange: (Int) -> Unit,
-    onSaveDiary: (Long, String, String, String) -> Unit
+    onMonthChange: (Int) -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -70,10 +70,19 @@ fun CalendarScreen(
         ) {
             CalendarCard(uiState, onDateSelected, onMonthChange)
             LegendSection()
-            DiarySection(
+            // 预测免责提示
+            Text(
+                "※ 预测结果仅供参考，月经周期可能因生活习惯、压力、健康状况等因素而变化",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 2.dp),
+                fontSize = 9.sp,
+                color = TextHint,
+                textAlign = TextAlign.Center
+            )
+            DiaryViewSection(
                 selectedDate = uiState.selectedDate,
-                diaryEntry = diaryEntry,
-                onSave = onSaveDiary
+                diaryEntry = diaryEntry
             )
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -102,54 +111,14 @@ private fun TopSection(uiState: PeriodUiState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.Top
         ) {
-            ToolBar()
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 BunnyMascot(modifier = Modifier.size(56.dp, 68.dp))
                 CountdownBubble(uiState)
             }
         }
-    }
-}
-
-@Composable
-private fun ToolBar() {
-    Surface(
-        modifier = Modifier.padding(top = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        shadowElevation = 1.dp
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ToolBarIcon(Icons.Outlined.Menu, false)
-            ToolBarIcon(Icons.Outlined.CalendarMonth, true)
-            ToolBarIcon(Icons.Outlined.DarkMode, false)
-            ToolBarIcon(Icons.Outlined.ChatBubbleOutline, false)
-        }
-    }
-}
-
-@Composable
-private fun ToolBarIcon(icon: ImageVector, isSelected: Boolean) {
-    Box(
-        modifier = Modifier
-            .size(28.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) AccentOrange.copy(alpha = 0.2f) else Color.Transparent)
-            .clickable { },
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = if (isSelected) AccentOrange else TextSecondary
-        )
     }
 }
 
@@ -322,14 +291,11 @@ private fun ActionButton(icon: ImageVector, label: String, color: Color, onClick
 }
 
 @Composable
-private fun DiarySection(
+private fun DiaryViewSection(
     selectedDate: Long,
-    diaryEntry: DiaryEntry?,
-    onSave: (Long, String, String, String) -> Unit
+    diaryEntry: DiaryEntry?
 ) {
     val dateFormat = SimpleDateFormat("M月d日", Locale.CHINESE)
-    var mood by remember(selectedDate) { mutableStateOf(diaryEntry?.mood ?: "") }
-    var notes by remember(selectedDate) { mutableStateOf(diaryEntry?.notes ?: "") }
 
     Card(
         modifier = Modifier
@@ -340,6 +306,7 @@ private fun DiarySection(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+            // 标题栏
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -347,116 +314,217 @@ private fun DiarySection(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Outlined.EditNote,
+                        imageVector = Icons.Outlined.EventNote,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                         tint = PrimaryPink
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        "${dateFormat.format(Date(selectedDate))} 的日记",
+                        "${dateFormat.format(Date(selectedDate))} 的记录",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                 }
-                if (diaryEntry != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.CheckCircleOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = AccentTeal
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text("已保存", fontSize = 10.sp, color = AccentTeal)
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 心情选择
-            Text("今日心情", fontSize = 11.sp, color = TextSecondary)
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                moodOptions.forEach { moodOpt ->
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { mood = if (mood == moodOpt.key) "" else moodOpt.key },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
+            if (diaryEntry == null) {
+                // 无记录提示
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFAFAFA), RoundedCornerShape(10.dp))
+                        .padding(vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Outlined.StickyNote2,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = TextHint
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "该日期暂无记录",
+                            fontSize = 12.sp,
+                            color = TextHint
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "可前往「记录」页面添加~",
+                            fontSize = 10.sp,
+                            color = TextHint
+                        )
+                    }
+                }
+            } else {
+                // ── 心情展示 ──
+                if (diaryEntry.mood.isNotEmpty()) {
+                    val moodMatch = moodOptions.find { it.key == diaryEntry.mood }
+                    if (moodMatch != null) {
+                        Row(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (mood == moodOpt.key) PrimaryPink.copy(alpha = 0.2f)
-                                    else Color(0xFFF5F5F5)
-                                ),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .background(PrimaryPink.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = moodOpt.icon,
-                                contentDescription = moodOpt.label,
-                                modifier = Modifier.size(20.dp),
-                                tint = if (mood == moodOpt.key) PrimaryPink else TextSecondary
+                                imageVector = moodMatch.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = PrimaryPink
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "心情：${moodMatch.label}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = PrimaryPink
                             )
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
+                // ── 身体状态摘要 ──
+                val statusItems = buildList {
+                    if (diaryEntry.flowLevel > 0) {
+                        val label = when (diaryEntry.flowLevel) { 1 -> "少"; 2 -> "中"; 3 -> "多"; else -> "" }
+                        add("月经量" to label)
+                    }
+                    if (diaryEntry.flowColor.isNotEmpty()) {
+                        val label = when (diaryEntry.flowColor) {
+                            "light_red" -> "浅红"; "red" -> "正红"; "dark_red" -> "深红"
+                            "brown" -> "棕色"; "black" -> "黑色"; else -> diaryEntry.flowColor
+                        }
+                        add("经血颜色" to label)
+                    }
+                    if (diaryEntry.painLevel > 0) {
+                        val label = when (diaryEntry.painLevel) { 1 -> "轻微"; 2 -> "中等"; 3 -> "较重"; 4 -> "严重"; else -> "" }
+                        add("痛经" to label)
+                    }
+                    if (diaryEntry.breastPain > 0) {
+                        val label = when (diaryEntry.breastPain) { 1 -> "轻微"; 2 -> "明显"; 3 -> "严重"; else -> "" }
+                        add("胸部胀痛" to label)
+                    }
+                    if (diaryEntry.backPain > 0) {
+                        val label = when (diaryEntry.backPain) { 1 -> "轻微"; 2 -> "明显"; 3 -> "严重"; else -> "" }
+                        add("腰腹痛" to label)
+                    }
+                    if (diaryEntry.headache > 0) {
+                        val label = when (diaryEntry.headache) { 1 -> "轻微"; 2 -> "明显"; 3 -> "严重"; else -> "" }
+                        add("头痛" to label)
+                    }
+                    if (diaryEntry.digestive > 0) {
+                        val label = when (diaryEntry.digestive) { 1 -> "不适"; 2 -> "腹泻"; 3 -> "便秘"; else -> "" }
+                        add("肠胃" to label)
+                    }
+                    if (diaryEntry.fatigue > 0) {
+                        val label = when (diaryEntry.fatigue) { 1 -> "正常"; 2 -> "有点累"; 3 -> "很疲惫"; else -> "" }
+                        add("疲劳" to label)
+                    }
+                    if (diaryEntry.skinCondition.isNotEmpty()) {
+                        val label = when (diaryEntry.skinCondition) {
+                            "good" -> "很好"; "normal" -> "正常"; "oily" -> "出油"
+                            "acne" -> "长痘"; "dry" -> "干燥"; else -> diaryEntry.skinCondition
+                        }
+                        add("皮肤" to label)
+                    }
+                    if (diaryEntry.temperature.isNotEmpty()) {
+                        add("体温" to "${diaryEntry.temperature}°C")
+                    }
+                    if (diaryEntry.appetite > 0) {
+                        val label = when (diaryEntry.appetite) { 1 -> "增加"; 2 -> "减少"; else -> "" }
+                        add("食欲" to label)
+                    }
+                    if (diaryEntry.discharge.isNotEmpty()) {
+                        val label = when (diaryEntry.discharge) {
+                            "none" -> "无"; "clear" -> "透明"; "white" -> "白色"
+                            "yellow" -> "黄色"; "sticky" -> "粘稠"; else -> diaryEntry.discharge
+                        }
+                        add("分泌物" to label)
+                    }
+                }
+
+                if (statusItems.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.MonitorHeart,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = AccentTeal
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("身体状态", fontSize = 11.sp, color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // 用 FlowRow 风格展示标签
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        statusItems.forEach { (name, value) ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AccentTeal.copy(alpha = 0.1f)
+                            ) {
+                                Text(
+                                    "$name: $value",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    fontSize = 10.sp,
+                                    color = AccentTeal,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // ── 日记内容 ──
+                if (diaryEntry.notes.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.EditNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = PrimaryPink
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("日记", fontSize = 11.sp, color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFFFFAFB)
+                    ) {
                         Text(
-                            moodOpt.label,
-                            fontSize = 8.sp,
-                            color = if (mood == moodOpt.key) PrimaryPink else TextHint
+                            diaryEntry.notes,
+                            modifier = Modifier.padding(10.dp),
+                            fontSize = 12.sp,
+                            color = TextPrimary,
+                            lineHeight = 18.sp
                         )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 日记内容
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                placeholder = { Text("写点什么吧~", fontSize = 12.sp, color = TextHint) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = PrimaryPink,
-                    unfocusedBorderColor = Color(0xFFE0E0E0),
-                    focusedContainerColor = Color(0xFFFFFAFB),
-                    unfocusedContainerColor = Color(0xFFFAFAFA)
-                ),
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 保存按钮
-            Button(
-                onClick = { onSave(selectedDate, mood, "", notes) },
-                modifier = Modifier.fillMaxWidth().height(38.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryPink),
-                enabled = mood.isNotEmpty() || notes.isNotEmpty()
-            ) {
-                Icon(
-                    imageVector = if (diaryEntry != null) Icons.Outlined.Edit else Icons.Outlined.Save,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    if (diaryEntry != null) "更新日记" else "保存日记",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                // 如果什么都没有记录（不太可能但防御性处理）
+                if (diaryEntry.mood.isEmpty() && statusItems.isEmpty() && diaryEntry.notes.isEmpty()) {
+                    Text(
+                        "已有记录但内容为空",
+                        fontSize = 11.sp,
+                        color = TextHint,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
             }
         }
     }
