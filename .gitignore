@@ -20,3 +20,6 @@ local.properties
 bunny.png
 local.properties
 setup_android_env.sh
+\n# Operit and Backup
+.operit/
+.backup/
