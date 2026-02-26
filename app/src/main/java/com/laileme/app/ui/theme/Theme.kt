@@ -11,23 +11,25 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val LightColorScheme = lightColorScheme(
-    primary = PrimaryPink,
-    onPrimary = Color.White,
-    primaryContainer = LightPink,
-    secondary = AccentTeal,
-    tertiary = AccentOrange,
-    background = Background,
-    surface = CardBackground,
-    onBackground = TextPrimary,
-    onSurface = TextPrimary
-)
-
 @Composable
 fun LailemeTheme(
     content: @Composable () -> Unit
 ) {
-    val colorScheme = LightColorScheme
+    // 读取动态主色，Compose会自动在ThemeManager.currentPrimary变化时重组
+    val dynamicPrimary = ThemeManager.currentPrimary
+    val dynamicLightPrimary = ThemeManager.currentLightPrimary
+
+    val colorScheme = lightColorScheme(
+        primary = dynamicPrimary,
+        onPrimary = Color.White,
+        primaryContainer = dynamicLightPrimary,
+        secondary = AccentTeal,
+        tertiary = AccentOrange,
+        background = Background,
+        surface = CardBackground,
+        onBackground = TextPrimary,
+        onSurface = TextPrimary
+    )
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

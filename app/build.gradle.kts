@@ -12,12 +12,21 @@ android {
         applicationId = "com.laileme.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "beta1.0"
+        versionCode = 12
+        versionName = "beta2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("../laileme.jks")
+            storePassword = "1526374"
+            keyAlias = "laileme"
+            keyPassword = "1526374"
         }
     }
 
@@ -28,6 +37,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -88,6 +98,9 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // Coil 图片加载（Compose）
+    implementation("io.coil-kt:coil-compose:2.6.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

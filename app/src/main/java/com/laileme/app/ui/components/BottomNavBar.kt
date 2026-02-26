@@ -39,7 +39,8 @@ enum class NavItem(val label: String, val icon: ImageVector) {
 fun BottomNavBar(
     selectedItem: NavItem,
     onItemSelected: (NavItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    visibleItems: List<NavItem> = NavItem.entries
 ) {
     Surface(
         modifier = modifier
@@ -54,9 +55,9 @@ fun BottomNavBar(
                 .fillMaxWidth()
                 .padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp)
         ) {
-            val itemCount = NavItem.entries.size
+            val itemCount = visibleItems.size
             val itemWidth = maxWidth / itemCount
-            val selectedIndex = selectedItem.ordinal
+            val selectedIndex = visibleItems.indexOf(selectedItem).coerceAtLeast(0)
 
             // 平移动画指示器
             val indicatorOffset by animateDpAsState(
@@ -82,7 +83,7 @@ fun BottomNavBar(
                     .padding(bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NavItem.entries.forEach { item ->
+                visibleItems.forEach { item ->
                     Box(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center

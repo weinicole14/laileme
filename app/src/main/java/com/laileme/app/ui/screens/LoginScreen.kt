@@ -42,6 +42,7 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf("") }
+    var selectedGender by remember { mutableStateOf("female") } // female/male
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -199,6 +200,99 @@ fun LoginScreen(
                         leadingIcon = Icons.Outlined.Badge
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    // 性别选择
+                    Text(
+                        text = "选择性别",
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp, start = 4.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 女生按钮
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .clickable { selectedGender = "female" },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (selectedGender == "female") PrimaryPink.copy(alpha = 0.15f) else Color.White
+                            ),
+                            border = if (selectedGender == "female")
+                                androidx.compose.foundation.BorderStroke(1.5.dp, PrimaryPink)
+                            else
+                                androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E0E0))
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Female,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (selectedGender == "female") PrimaryPink else TextHint
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "女生",
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedGender == "female") FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selectedGender == "female") PrimaryPink else TextSecondary
+                                )
+                            }
+                        }
+                        // 男生按钮
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .clickable { selectedGender = "male" },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (selectedGender == "male") Color(0xFF4FC3F7).copy(alpha = 0.15f) else Color.White
+                            ),
+                            border = if (selectedGender == "male")
+                                androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF4FC3F7))
+                            else
+                                androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E0E0))
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Male,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (selectedGender == "male") Color(0xFF4FC3F7) else TextHint
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "男生",
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedGender == "male") FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selectedGender == "male") Color(0xFF4FC3F7) else TextSecondary
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (selectedGender == "female") "女生可使用全部记录功能" else "男生可绑定伴侣查看周期",
+                        fontSize = 11.sp,
+                        color = TextHint,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
 
@@ -324,7 +418,7 @@ fun LoginScreen(
                             if (password != confirmPassword) {
                                 errorMessage = "两次密码不一致"
                             } else {
-                                when (val result = AuthManager.register(username, password, nickname)) {
+                                when (val result = AuthManager.register(username, password, nickname, selectedGender)) {
                                     is AuthResult.Success -> onLoginSuccess()
                                     is AuthResult.Error -> errorMessage = result.message
                                 }

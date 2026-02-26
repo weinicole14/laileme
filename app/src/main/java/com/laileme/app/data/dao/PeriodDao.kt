@@ -39,4 +39,8 @@ interface PeriodDao {
     /** 批量删除 */
     @Delete
     suspend fun deleteAll(records: List<PeriodRecord>)
+
+    /** 清空所有记录 */
+    @Query("DELETE FROM period_records")
+    suspend fun deleteAllRecords()
 }

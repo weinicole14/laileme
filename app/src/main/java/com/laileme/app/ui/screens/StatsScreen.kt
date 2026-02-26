@@ -72,7 +72,8 @@ fun StatsScreen(records: List<PeriodRecord>) {
 @Composable
 private fun StatsCard(records: List<PeriodRecord>) {
     val completedRecords = records.filter { it.endDate != null }
-    val avgCycle = if (completedRecords.isNotEmpty()) {
+    // 周期至少需要2条完整记录才能准确计算（1条时cycleLength是默认值）
+    val avgCycle = if (completedRecords.size >= 2) {
         completedRecords.map { it.cycleLength }.average().toInt()
     } else -1
 
@@ -568,13 +569,15 @@ private fun calculateSleepHours(bedtime: String, waketime: String): Double {
         val wakeMinutes = wakeParts[0].toInt() * 60 + wakeParts[1].toInt()
 
         val diffMinutes = if (wakeMinutes >= bedMinutes) {
-            // 同一天（比如 06:00入睡 14:00起床，午睡场景）
+            // 同一天（如 06:00→14:00 = 8h）
             wakeMinutes - bedMinutes
         } else {
-            // 跨日（比如 23:00入睡 07:00起床）
+            // 跨日（如 23:00→07:00 = 8h）
             (24 * 60 - bedMinutes) + wakeMinutes
         }
-        diffMinutes / 60.0
+        // 如果超过18小时说明操作顺序反了，取较短解释
+        val finalMinutes = if (diffMinutes > 18 * 60) (24 * 60 - diffMinutes) else diffMinutes
+        finalMinutes / 60.0
     } catch (e: Exception) {
         0.0
     }

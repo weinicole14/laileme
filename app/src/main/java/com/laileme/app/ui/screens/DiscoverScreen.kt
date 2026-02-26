@@ -60,6 +60,7 @@ private fun saveMedications(prefs: SharedPreferences, meds: List<Medication>) {
         "medications",
         meds.joinToString(";;") { "${it.name}||${it.dosage}||${it.time}||${it.repeatType}||${it.repeatData}" }
     ).apply()
+    com.laileme.app.data.SyncManager.triggerImmediateSync()
 }
 
 // ── 提醒频率显示文字 ──
@@ -86,11 +87,13 @@ private fun calculateSleepDuration(bedtime: String, waketime: String): Pair<Int,
         val wakeParts = waketime.split(":")
         val bedMinutes = bedParts[0].toInt() * 60 + bedParts[1].toInt()
         val wakeMinutes = wakeParts[0].toInt() * 60 + wakeParts[1].toInt()
-        val totalMinutes = if (wakeMinutes >= bedMinutes) {
+        val diffMinutes = if (wakeMinutes >= bedMinutes) {
             wakeMinutes - bedMinutes
         } else {
             (24 * 60 - bedMinutes) + wakeMinutes
         }
+        // 超过18小时说明操作顺序反了，取较短解释
+        val totalMinutes = if (diffMinutes > 18 * 60) (24 * 60 - diffMinutes) else diffMinutes
         Pair(totalMinutes / 60, totalMinutes % 60)
     } catch (_: Exception) { null }
 }
@@ -884,6 +887,7 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
     var bedtime by remember { mutableStateOf("") }
     var waketime by remember { mutableStateOf("") }
     var dbLoaded by remember { mutableStateOf(false) }
+    var showSleepTip by remember { mutableStateOf(false) }
 
     // 从数据库加载今日记录
     LaunchedEffect(today) {
@@ -896,6 +900,9 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
     val duration = calculateSleepDuration(bedtime, waketime)
     val sleepColor = Color(0xFF5C6BC0)
     val sleepBg = Color(0xFFE8EAF6)
+
+    // 入睡按钮是否禁用：已记录入睡且还没起床 → 禁用
+    val isSleeping = bedtime.isNotEmpty() && waketime.isEmpty()
 
     // 获取当前时间的工具函数
     fun getCurrentTimeStr(): String {
@@ -913,16 +920,40 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
                     waketime = newWaketime
                 )
             )
+            com.laileme.app.data.SyncManager.triggerImmediateSync()
         }
     }
 
     // 睡眠质量评估
     val (qualityIcon, qualityText, qualityColor) = when {
-        duration == null -> Triple(Icons.Outlined.Bedtime, "记录睡眠吧", TextHint)
+        duration == null -> Triple(Icons.Outlined.Bedtime, if (isSleeping) "睡眠中…" else "记录睡眠吧", if (isSleeping) sleepColor else TextHint)
         duration.first < 6 -> Triple(Icons.Outlined.SentimentVeryDissatisfied, "睡眠不足", PeriodRed)
         duration.first < 7 -> Triple(Icons.Outlined.SentimentNeutral, "还可以哦", AccentOrange)
         duration.first < 9 -> Triple(Icons.Outlined.SentimentVerySatisfied, "很棒！", AccentTeal)
         else -> Triple(Icons.Outlined.SentimentDissatisfied, "睡太多啦", AccentOrange)
+    }
+
+    // 睡觉提示弹窗
+    if (showSleepTip) {
+        AlertDialog(
+            onDismissRequest = { showSleepTip = false },
+            confirmButton = {
+                TextButton(onClick = { showSleepTip = false }) {
+                    Text("晚安 💤", color = Color(0xFF9C27B0), fontWeight = FontWeight.Bold)
+                }
+            },
+            icon = {
+                Icon(
+                    Icons.Outlined.NightsStay,
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                    tint = Color(0xFF9C27B0)
+                )
+            },
+            title = { Text("晚安～", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+            text = { Text("该放下手机睡觉了哦～\n祝你做个好梦 🌙", fontSize = 15.sp, color = TextSecondary, textAlign = TextAlign.Center, lineHeight = 22.sp, modifier = Modifier.fillMaxWidth()) },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 
     Card(
@@ -938,7 +969,11 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("睡眠监测", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("好好休息，元气满满", fontSize = 11.sp, color = TextHint)
+                    Text(
+                        if (isSleeping) "正在睡眠中… 💤" else "好好休息，元气满满",
+                        fontSize = 11.sp,
+                        color = if (isSleeping) sleepColor else TextHint
+                    )
                 }
             }
 
@@ -946,18 +981,23 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
 
             // 睡眠时间卡片
             Row(modifier = Modifier.fillMaxWidth()) {
-                // 入睡时间 — 点击自动获取当前时间
+                // 入睡按钮
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            val now = getCurrentTimeStr()
-                            bedtime = now
-                            saveSleep(now, waketime)
-                        },
+                        .then(
+                            if (isSleeping) Modifier // 已入睡，不可点击
+                            else Modifier.clickable {
+                                val now = getCurrentTimeStr()
+                                bedtime = now
+                                waketime = "" // 重置起床时间（新的睡眠周期）
+                                saveSleep(now, "")
+                                showSleepTip = true
+                            }
+                        ),
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF3E5F5)
+                    color = if (isSleeping) Color(0xFFEEEEEE) else Color(0xFFF3E5F5)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
@@ -965,33 +1005,37 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
                     ) {
                         Icon(
                             Icons.Outlined.NightsStay, null,
-                            Modifier.size(22.dp), tint = Color(0xFF9C27B0)
+                            Modifier.size(22.dp),
+                            tint = if (isSleeping) TextHint else Color(0xFF9C27B0)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("入睡", fontSize = 11.sp, color = TextSecondary)
+                        Text("入睡", fontSize = 11.sp, color = if (isSleeping) TextHint else TextSecondary)
                         Text(
                             if (bedtime.isEmpty()) "点击记录" else bedtime,
                             fontSize = if (bedtime.isEmpty()) 13.sp else 22.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (bedtime.isEmpty()) TextHint else Color(0xFF9C27B0)
+                            color = if (isSleeping) TextHint else if (bedtime.isEmpty()) TextHint else Color(0xFF9C27B0)
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // 起床时间 — 点击自动获取当前时间
+                // 起床按钮 — 只有在已入睡时才可点击
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            val now = getCurrentTimeStr()
-                            waketime = now
-                            saveSleep(bedtime, now)
-                        },
+                        .then(
+                            if (bedtime.isEmpty()) Modifier // 还没睡，不能起床
+                            else Modifier.clickable {
+                                val now = getCurrentTimeStr()
+                                waketime = now
+                                saveSleep(bedtime, now)
+                            }
+                        ),
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFFF8E1)
+                    color = if (bedtime.isEmpty()) Color(0xFFEEEEEE) else Color(0xFFFFF8E1)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
@@ -999,15 +1043,16 @@ private fun SleepMonitorSection(prefs: SharedPreferences) {
                     ) {
                         Icon(
                             Icons.Outlined.WbSunny, null,
-                            Modifier.size(22.dp), tint = AccentOrange
+                            Modifier.size(22.dp),
+                            tint = if (bedtime.isEmpty()) TextHint else AccentOrange
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("起床", fontSize = 11.sp, color = TextSecondary)
+                        Text("起床", fontSize = 11.sp, color = if (bedtime.isEmpty()) TextHint else TextSecondary)
                         Text(
                             if (waketime.isEmpty()) "点击记录" else waketime,
                             fontSize = if (waketime.isEmpty()) 13.sp else 22.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (waketime.isEmpty()) TextHint else AccentOrange
+                            color = if (bedtime.isEmpty()) TextHint else if (waketime.isEmpty()) TextHint else AccentOrange
                         )
                     }
                 }

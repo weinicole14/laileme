@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">来了么</string>
+<string name="widget_description">显示经期倒计时信息</string>
+<string name="widget_dashboard_description">综合面板：相伴天数、经期、用药、喝水、睡眠</string>
 </resources>

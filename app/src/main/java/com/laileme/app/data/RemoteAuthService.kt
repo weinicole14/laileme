@@ -27,7 +27,7 @@ interface AuthApi {
 
 // ── 请求数据类 ──
 data class LoginRequest(val username: String, val password: String)
-data class RegisterRequest(val username: String, val password: String, val nickname: String)
+data class RegisterRequest(val username: String, val password: String, val nickname: String, val gender: String = "female")
 data class UpdateProfileRequest(val nickname: String, val avatarUrl: String)
 
 // ── 响应数据类 ──
@@ -39,10 +39,13 @@ data class ApiResponse(
 
 data class UserData(
     val userId: String = "",
+    val username: String = "",
+    val uid: String = "",
     val nickname: String = "",
     val avatarUrl: String = "",
     val email: String = "",
     val phone: String = "",
+    val gender: String = "female",
     val token: String = ""
 )
 
@@ -53,6 +56,11 @@ class RemoteAuthService(baseUrl: String) : AuthService {
 
     /** 获取当前token（供SyncManager使用） */
     fun getToken(): String = token
+
+    /** 恢复token（App重启时从本地恢复） */
+    fun restoreToken(savedToken: String) {
+        token = savedToken
+    }
 
     private val api: AuthApi = Retrofit.Builder()
         .baseUrl(baseUrl)
@@ -74,9 +82,9 @@ class RemoteAuthService(baseUrl: String) : AuthService {
         }
     }
 
-    override suspend fun register(username: String, password: String, nickname: String): AuthResult {
+    override suspend fun register(username: String, password: String, nickname: String, gender: String): AuthResult {
         return try {
-            val resp = api.register(RegisterRequest(username, password, nickname))
+            val resp = api.register(RegisterRequest(username, password, nickname, gender))
             if (resp.code == 200 && resp.data != null) {
                 token = resp.data.token
                 AuthResult.Success(resp.data.toUserInfo())
@@ -124,9 +132,12 @@ class RemoteAuthService(baseUrl: String) : AuthService {
 
     private fun UserData.toUserInfo() = UserInfo(
         userId = userId,
+        username = username,
+        uid = uid,
         nickname = nickname,
         avatarUrl = avatarUrl,
         email = email,
-        phone = phone
+        phone = phone,
+        gender = gender
     )
 }

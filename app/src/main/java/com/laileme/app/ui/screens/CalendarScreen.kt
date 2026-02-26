@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.laileme.app.data.AuthManager
 import com.laileme.app.data.entity.DiaryEntry
 import com.laileme.app.ui.PeriodUiState
 import com.laileme.app.ui.normalizeDate
@@ -127,11 +128,14 @@ private fun CountdownBubble(uiState: PeriodUiState) {
     val hasRecord = uiState.latestRecord != null
     val text = when {
         !hasRecord -> "记录经期"
+        uiState.isFirstRecord && uiState.isInPeriod -> "经期记录中"
+        uiState.isFirstRecord && !uiState.isInPeriod -> "周期收集中"
         uiState.isInPeriod -> "还有 ${uiState.daysUntilPeriodEnd} 天结束"
         else -> "还有 ${uiState.daysUntilNextPeriod} 天来"
     }
     val bgColor = when {
         !hasRecord -> AccentBlue.copy(alpha = 0.3f)
+        uiState.isFirstRecord -> PrimaryPink.copy(alpha = 0.3f)
         uiState.isInPeriod -> PeriodRed.copy(alpha = 0.3f)
         else -> AccentBlue.copy(alpha = 0.3f)
     }
@@ -240,22 +244,26 @@ private fun BottomActionPanel(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 操作按钮 - 仅女性用户显示月经相关按钮
+            val calGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                ActionButton(
-                    icon = Icons.Outlined.PlayCircleOutline,
-                    label = "月经开始",
-                    color = if (!hasActivePeriod) PrimaryPink else TextHint,
-                    onClick = if (!hasActivePeriod) onStartPeriod else { {} }
-                )
-                ActionButton(
-                    icon = Icons.Outlined.StopCircle,
-                    label = "月经结束",
-                    color = if (hasActivePeriod) PeriodRed else TextHint,
-                    onClick = if (hasActivePeriod) onEndPeriod else { {} }
-                )
+                if (calGender == "female") {
+                    ActionButton(
+                        icon = Icons.Outlined.PlayCircleOutline,
+                        label = "月经开始",
+                        color = if (!hasActivePeriod) PrimaryPink else TextHint,
+                        onClick = if (!hasActivePeriod) onStartPeriod else { {} }
+                    )
+                    ActionButton(
+                        icon = Icons.Outlined.StopCircle,
+                        label = "月经结束",
+                        color = if (hasActivePeriod) PeriodRed else TextHint,
+                        onClick = if (hasActivePeriod) onEndPeriod else { {} }
+                    )
+                }
                 ActionButton(Icons.Outlined.AddCircleOutline, "状态", AccentTeal) { }
             }
         }

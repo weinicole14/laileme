@@ -1,12 +1,21 @@
 package com.laileme.app.ui
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.laileme.app.data.AppDatabase
+import com.laileme.app.data.AuthManager
+import com.laileme.app.data.PartnerManager
+import com.laileme.app.data.SyncManager
 import com.laileme.app.data.entity.DiaryEntry
 import com.laileme.app.data.entity.PeriodRecord
+import com.laileme.app.data.entity.SleepRecord
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
@@ -25,6 +34,7 @@ data class PeriodUiState(
     val cycleDay: Int = 0,
     val cycleProgress: Float = 0f,
     val periodProgress: Float = 0f,
+    val isFirstRecord: Boolean = false,  // 是否是首次记录（无已完成记录）
     val hasSetup: Boolean = false,
     val trackingMode: String = "auto", // "auto" = 自动推算, "manual" = 手动输入
     val savedCycleLength: Int = 28,
@@ -66,6 +76,17 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentDiary = MutableStateFlow<DiaryEntry?>(null)
     val currentDiary: StateFlow<DiaryEntry?> = _currentDiary.asStateFlow()
 
+    private var partnerUpdateReceiver: BroadcastReceiver? = null
+
+    /** 获取当前token */
+    private fun getToken(): String {
+        return try {
+            val field = SyncManager::class.java.getDeclaredField("token")
+            field.isAccessible = true
+            field.get(null) as? String ?: ""
+        } catch (e: Exception) { "" }
+    }
+
     init {
         // 从 SharedPreferences 读取设置
         val hasSetup = prefs.getBoolean("has_setup", false)
@@ -97,6 +118,113 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
         }
+
+        // 男性用户：自动拉取伴侣经期数据存入本地数据库
+        viewModelScope.launch {
+            try {
+                val user = AuthManager.userState.value
+                if (user != null && user.gender == "male") {
+                    val token = getToken()
+                    if (token.isNotEmpty()) {
+                        syncPartnerData(token)
+                    }
+                    // 也监听 userState 变化（登录后触发）
+                    AuthManager.userState.filterNotNull()
+                        .filter { it.gender == "male" }
+                        .collectLatest {
+                            val t = getToken()
+                            if (t.isNotEmpty()) {
+                                syncPartnerData(t)
+                            }
+                        }
+                }
+            } catch (e: Exception) {
+                Log.e("PeriodViewModel", "伴侣数据同步检查失败", e)
+            }
+        }
+
+        // 注册广播接收器：伴侣数据更新时自动重新拉取
+        partnerUpdateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                Log.i("PeriodViewModel", "收到伴侣数据更新广播，开始重新同步...")
+                viewModelScope.launch {
+                    try {
+                        val t = getToken()
+                        if (t.isNotEmpty()) {
+                            syncPartnerData(t)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("PeriodViewModel", "广播触发伴侣同步失败", e)
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter("com.laileme.app.PARTNER_DATA_UPDATED")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            application.registerReceiver(partnerUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            application.registerReceiver(partnerUpdateReceiver, filter)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            partnerUpdateReceiver?.let {
+                getApplication<Application>().unregisterReceiver(it)
+            }
+        } catch (e: Exception) {
+            Log.e("PeriodViewModel", "unregister receiver err", e)
+        }
+    }
+
+    /** 从服务器拉取伴侣经期数据并存入本地数据库 */
+    suspend fun syncPartnerData(token: String) {
+        try {
+            val partnerData = PartnerManager.getPartnerData(token)
+            if (partnerData != null && partnerData.periodRecords.isNotEmpty()) {
+                // 清空旧数据再写入（男性自己不记录，全部是伴侣的）
+                val existingRecords = dao.getAllList()
+                if (existingRecords.isNotEmpty()) {
+                    dao.deleteAll(existingRecords)
+                }
+
+                // 将伴侣经期记录写入本地数据库
+                for (p in partnerData.periodRecords) {
+                    val record = PeriodRecord(
+                        startDate = p.optLong("startDate", 0L),
+                        endDate = if (p.isNull("endDate")) null else p.optLong("endDate"),
+                        cycleLength = p.optInt("cycleLength", 28),
+                        periodLength = p.optInt("periodLength", 5),
+                        symptoms = p.optString("symptoms", ""),
+                        mood = p.optString("mood", ""),
+                        notes = p.optString("notes", "")
+                    )
+                    if (record.startDate > 0) {
+                        dao.insert(record)
+                    }
+                }
+
+                // 写入伴侣的睡眠数据
+                val sleepDao = db.sleepDao()
+                for (s in partnerData.sleepRecords) {
+                    val sleepRecord = SleepRecord(
+                        date = s.optString("date", ""),
+                        bedtime = s.optString("bedtime", ""),
+                        waketime = s.optString("waketime", "")
+                    )
+                    if (sleepRecord.date.isNotEmpty()) {
+                        sleepDao.insert(sleepRecord)
+                    }
+                }
+
+                Log.i("PeriodViewModel", "伴侣数据同步成功: ${partnerData.periodRecords.size}条经期, ${partnerData.sleepRecords.size}条睡眠")
+            } else {
+                Log.i("PeriodViewModel", "伴侣未绑定或无数据")
+            }
+        } catch (e: Exception) {
+            Log.e("PeriodViewModel", "伴侣数据同步失败", e)
+        }
     }
 
     /** 保存周期设置（首次设置 or 设置页修改） */
@@ -111,6 +239,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(hasSetup = true, savedCycleLength = cycle, savedPeriodLength = period)
         }
+        SyncManager.triggerImmediateSync()
     }
 
     /** 保存记录模式（auto=自动推算 / manual=手动输入） */
@@ -120,6 +249,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
             .putBoolean("has_setup", true)
             .apply()
         _uiState.update { it.copy(trackingMode = mode, hasSetup = true) }
+        SyncManager.triggerImmediateSync()
     }
 
     // ─────────────── 核心计算 ───────────────
@@ -151,15 +281,16 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
         val periodEndMs = if (latest.endDate != null) {
             normalizeDate(latest.endDate)
         } else {
-            startMs + (latest.periodLength - 1) * 24L * 60 * 60 * 1000
+            // 用户未手动结束经期时，不根据periodLength自动结束
+            // 经期持续到今天或预计结束日的较大值
+            maxOf(startMs + (latest.periodLength - 1) * 24L * 60 * 60 * 1000, todayMs)
         }
 
         // 有没有"活跃"（未结束）的经期 => 决定"结束"按钮是否可点
         val hasActivePeriod = latest.endDate == null
 
-        // 今天是否在经期范围内
-        val isInPeriod = todayMs in startMs..periodEndMs && hasActivePeriod
-                || todayMs in startMs..periodEndMs  // 即使已结束但今天仍在范围内也算
+        // 今天是否在经期范围内：只有未手动结束时才算经期中
+        val isInPeriod = hasActivePeriod && todayMs in startMs..periodEndMs
 
         // 简化：只在第一个周期内精确判断，后续周期用预测
         val cycleLength = latest.cycleLength
@@ -200,22 +331,26 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
 
         val cycleProgress = if (cycleLength > 0) effectiveDay.toFloat() / cycleLength else 0f
         val periodProgress = if (isInPeriod && periodLength > 0) {
-            daysBetween(startMs, todayMs).toFloat() / periodLength
+            val raw = daysBetween(startMs, todayMs).toFloat() / periodLength
+            if (raw > 0.9f) 0.9f else raw  // 超过预设天数后保持90%
         } else 0f
 
         _uiState.update {
-            it.copy(
-                records = records,
-                latestRecord = latest,
-                isInPeriod = isInPeriod,
-                hasActivePeriod = hasActivePeriod,
-                daysUntilPeriodEnd = daysUntilPeriodEnd,
-                daysUntilNextPeriod = daysUntilNextPeriod,
-                currentPhase = phase,
-                cycleDay = cycleDay,
-                cycleProgress = cycleProgress,
-                periodProgress = periodProgress
-            )
+                // 需要至少2条已完成记录才能推算出真正的周期长度
+                val completedCount = records.count { it.endDate != null }
+                it.copy(
+                    records = records,
+                    latestRecord = latest,
+                    isInPeriod = isInPeriod,
+                    hasActivePeriod = hasActivePeriod,
+                    daysUntilPeriodEnd = daysUntilPeriodEnd,
+                    daysUntilNextPeriod = daysUntilNextPeriod,
+                    currentPhase = phase,
+                    cycleDay = cycleDay,
+                    cycleProgress = cycleProgress,
+                    periodProgress = periodProgress,
+                    isFirstRecord = completedCount < 2
+                )
         }
     }
 
@@ -243,14 +378,21 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                 val lastStartNorm = normalizeDate(lastCompleted.startDate)
                 val daysSinceLast = daysBetween(lastStartNorm, normalized)
 
-                // 距上次记录不足3天 → 视为同一次经期，重新激活已有记录而非创建新的
-                // 防止同一天反复点击"来了""结束"产生大量短周期记录
-                if (daysSinceLast < 3) {
+                // 距上次结束日期的天数
+                val lastEndNorm = if (lastCompleted.endDate != null) normalizeDate(lastCompleted.endDate) else lastStartNorm
+                val daysSinceEnd = daysBetween(lastEndNorm, normalized)
+
+                // 重新激活条件（视为同一次经期，而非新周期）：
+                // 1. 距上次开始不超过经期天数+2天（还在同一个经期窗口内），或
+                // 2. 距上次结束不超过3天（刚结束就又来了）
+                // 防止经期中途误点"结束"再"开始"导致创建极短周期记录
+                if (daysSinceLast < lastCompleted.periodLength + 2 || daysSinceEnd < 3) {
                     // 恢复经期天数为用户设置的默认值（结束时可能被改成了1天）
                     dao.update(lastCompleted.copy(
                         endDate = null,
                         periodLength = state.savedPeriodLength
                     ))
+                    SyncManager.triggerImmediateSync()
                     return@launch
                 }
             }
@@ -285,6 +427,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                     periodLength = periodLen
                 )
             )
+            SyncManager.triggerImmediateSync()
         }
     }
 
@@ -314,6 +457,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                     periodLength = actualPeriodLength
                 )
             )
+            SyncManager.triggerImmediateSync()
         }
     }
 
@@ -336,7 +480,10 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteRecord(record: PeriodRecord) {
-        viewModelScope.launch { dao.delete(record) }
+        viewModelScope.launch {
+            dao.delete(record)
+            SyncManager.triggerImmediateSync()
+        }
     }
 
     /** 重置当前经期记录（删除最新的活跃/最近记录） */
@@ -350,6 +497,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                 val latest = dao.getLatestCompletedRecord()
                 if (latest != null) dao.delete(latest)
             }
+            SyncManager.triggerImmediateSync()
             // Flow 会自动触发状态刷新
         }
     }
@@ -365,6 +513,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 diaryDao.insert(entry.copy(date = normalizedDate))
             }
+            SyncManager.triggerImmediateSync()
         }
     }
 }

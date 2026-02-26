@@ -22,6 +22,7 @@ object NotificationHelper {
     private const val CHANNEL_MED = "laileme_medication"
     private const val CHANNEL_SLEEP = "laileme_sleep"
     private const val CHANNEL_TIPS = "laileme_tips"
+    private const val CHANNEL_PARTNER = "laileme_partner"
 
     /** 初始化所有通知渠道（Android 8.0+） */
     fun createChannels(context: Context) {
@@ -52,7 +53,12 @@ object NotificationHelper {
                 NotificationChannel(
                     CHANNEL_TIPS, "暖心小贴士",
                     NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "不定时推送的健康生活小贴士" }
+                ).apply { description = "不定时推送的健康生活小贴士" },
+
+                NotificationChannel(
+                    CHANNEL_PARTNER, "伴侣动态",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply { description = "伴侣数据更新提醒" }
             )
 
             channels.forEach { manager.createNotificationChannel(it) }
@@ -120,5 +126,21 @@ object NotificationHelper {
     fun sendWarmTip(context: Context) {
         val (title, content) = NotificationMessages.randomTip()
         send(context, CHANNEL_TIPS, 1005, title, content)
+    }
+
+    /** 伴侣数据更新通知 */
+    fun sendPartnerUpdate(context: Context, partnerNickname: String) {
+        val titles = listOf(
+            "伴侣数据更新",
+            "她的数据有变化",
+            "来自伴侣的更新"
+        )
+        val contents = listOf(
+            "${partnerNickname}的经期数据已更新，快去看看吧～",
+            "${partnerNickname}刚刚更新了数据，点击查看最新状态",
+            "${partnerNickname}的记录有变化啦～关心她从了解开始"
+        )
+        val idx = (System.currentTimeMillis() % titles.size).toInt()
+        send(context, CHANNEL_PARTNER, 1006, titles[idx], contents[idx])
     }
 }

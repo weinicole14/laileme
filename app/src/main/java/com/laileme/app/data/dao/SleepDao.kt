@@ -17,4 +17,7 @@ interface SleepDao {
 
     @Query("SELECT * FROM sleep_records ORDER BY date DESC LIMIT :limit")
     fun getRecent(limit: Int): Flow<List<SleepRecord>>
+
+    @Query("DELETE FROM sleep_records")
+    suspend fun deleteAll()
 }

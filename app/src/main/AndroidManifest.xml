@@ -27,6 +27,34 @@ android:allowBackup="true"
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 桌面小部件 -->
+        <receiver
+            android:name=".widget.PeriodWidgetProvider"
+            android:exported="true"
+            android:label="来了么 · 经期倒计时">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.laileme.app.WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+            android:resource="@xml/widget_period_info" />
+        </receiver>
+
+        <!-- 4×2 综合面板小部件 -->
+        <receiver
+            android:name=".widget.DashboardWidgetProvider"
+            android:exported="true"
+            android:label="来了么 · 综合面板">
+            <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.laileme.app.DASHBOARD_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_dashboard_info" />
+        </receiver>
     </application>
 
 </manifest>

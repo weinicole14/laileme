@@ -27,4 +27,8 @@ interface DiaryDao {
 
     @Delete
     suspend fun delete(entry: DiaryEntry)
+
+    /** 清空所有日记 */
+    @Query("DELETE FROM diary_entries")
+    suspend fun deleteAll()
 }

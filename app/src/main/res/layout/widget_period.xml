@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <!-- 标题 -->
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="来了么"
+        android:textSize="13sp"
+        android:textColor="#FF9CA3AF"
+        android:fontFamily="sans-serif-medium" />
+
+    <!-- 天数 -->
+    <TextView
+        android:id="@+id/widget_days"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="--"
+        android:textSize="42sp"
+        android:textColor="#FFEC407A"
+        android:fontFamily="sans-serif-bold"
+        android:layout_marginTop="2dp" />
+
+    <!-- 描述 -->
+    <TextView
+        android:id="@+id/widget_desc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="记录经期"
+        android:textSize="12sp"
+        android:textColor="#FF9CA3AF"
+        android:layout_marginTop="2dp" />
+
+    <!-- 周期天数 -->
+    <TextView
+        android:id="@+id/widget_cycle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="10sp"
+        android:textColor="#FFD1D5DB"
+        android:layout_marginTop="4dp" />
+
+</LinearLayout>

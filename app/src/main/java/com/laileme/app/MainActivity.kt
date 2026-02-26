@@ -1,7 +1,9 @@
 package com.laileme.app
 
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -9,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.SizeTransform
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.laileme.app.notification.NotificationHelper
 import com.laileme.app.notification.NotificationScheduler
+import com.laileme.app.data.AuthManager
 import com.laileme.app.ui.PeriodViewModel
 import com.laileme.app.ui.components.BottomNavBar
 import com.laileme.app.ui.components.NavItem
@@ -52,6 +58,31 @@ class MainActivity : ComponentActivity() {
         // 初始化通知渠道 & 定时任务
         NotificationHelper.createChannels(this)
         NotificationScheduler.scheduleAll(this)
+
+        // 适配高帧率（120Hz / 90Hz）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ 使用 Display.Mode API
+            window.attributes = window.attributes.also { params ->
+                val display = display ?: windowManager.defaultDisplay
+                val supportedModes = display.supportedModes
+                val bestMode = supportedModes.maxByOrNull { it.refreshRate }
+                if (bestMode != null) {
+                    params.preferredDisplayModeId = bestMode.modeId
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Android 6~10 使用 preferredRefreshRate
+            window.attributes = window.attributes.also { params ->
+                @Suppress("DEPRECATION")
+                val display = windowManager.defaultDisplay
+                val supportedModes = display.supportedModes
+                val maxRate = supportedModes.maxOfOrNull { it.refreshRate } ?: 60f
+                params.preferredRefreshRate = maxRate
+            }
+        }
+
+        // 初始化主题管理器
+        com.laileme.app.ui.theme.ThemeManager.init(this)
 
         // 初始化认证管理器（接入阿里云服务器）
         com.laileme.app.data.AuthManager.init(this)
@@ -81,6 +112,15 @@ class MainActivity : ComponentActivity() {
                 val viewModel: PeriodViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsState()
                 val currentDiary by viewModel.currentDiary.collectAsState()
+                // 根据性别决定可见的导航项（男性隐藏"记录"和"发现"）
+                val userGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
+                val visibleNavItems = remember(userGender) {
+                    if (userGender == "male") {
+                        listOf(NavItem.HOME, NavItem.CALENDAR, NavItem.STATS, NavItem.PROFILE)
+                    } else {
+                        NavItem.entries.toList()
+                    }
+                }
                 var selectedNav by remember { mutableStateOf(NavItem.HOME) }
                 // 记录上一个页面索引，用于判断滑动方向
                 var previousNavIndex by remember { mutableIntStateOf(0) }
@@ -107,31 +147,30 @@ class MainActivity : ComponentActivity() {
                     // 带平移动画的页面切换
                     AnimatedContent(
                         targetState = selectedNav,
+                        modifier = Modifier.fillMaxSize(),
                         transitionSpec = {
-                            val currentIndex = targetState.ordinal
+                            val currentIndex = visibleNavItems.indexOf(targetState).coerceAtLeast(0)
                             val prevIndex = previousNavIndex
 
-                            if (currentIndex > prevIndex) {
-                                // 向右切换：新页面从右边滑入，旧页面向左滑出
+                            (if (currentIndex > prevIndex) {
                                 (slideInHorizontally(
-                                    initialOffsetX = { fullWidth -> fullWidth },
-                                    animationSpec = tween(300)
-                                ) + fadeIn(animationSpec = tween(300))) togetherWith
+                                    initialOffsetX = { fullWidth -> fullWidth / 4 },
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
+                                ) + fadeIn(animationSpec = tween(200))) togetherWith
                                 (slideOutHorizontally(
-                                    targetOffsetX = { fullWidth -> -fullWidth / 3 },
-                                    animationSpec = tween(300)
-                                ) + fadeOut(animationSpec = tween(150)))
+                                    targetOffsetX = { fullWidth -> -fullWidth / 4 },
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
+                                ) + fadeOut(animationSpec = tween(120)))
                             } else {
-                                // 向左切换：新页面从左边滑入，旧页面向右滑出
                                 (slideInHorizontally(
-                                    initialOffsetX = { fullWidth -> -fullWidth },
-                                    animationSpec = tween(300)
-                                ) + fadeIn(animationSpec = tween(300))) togetherWith
+                                    initialOffsetX = { fullWidth -> -fullWidth / 4 },
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
+                                ) + fadeIn(animationSpec = tween(200))) togetherWith
                                 (slideOutHorizontally(
-                                    targetOffsetX = { fullWidth -> fullWidth / 3 },
-                                    animationSpec = tween(300)
-                                ) + fadeOut(animationSpec = tween(150)))
-                            }.using(SizeTransform(clip = false))
+                                    targetOffsetX = { fullWidth -> fullWidth / 4 },
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
+                                ) + fadeOut(animationSpec = tween(120)))
+                            }).using(SizeTransform(clip = true) { _, _ -> snap() })
                         },
                         label = "page_transition"
                     ) { nav ->
@@ -182,12 +221,13 @@ class MainActivity : ComponentActivity() {
                         ) + fadeOut(tween(150)),
                         modifier = Modifier.align(Alignment.BottomCenter)
                     ) {
-                        BottomNavBar(
+                    BottomNavBar(
                             selectedItem = selectedNav,
                             onItemSelected = { newNav ->
-                                previousNavIndex = selectedNav.ordinal
+                                previousNavIndex = visibleNavItems.indexOf(selectedNav).coerceAtLeast(0)
                                 selectedNav = newNav
-                            }
+                            },
+                            visibleItems = visibleNavItems
                         )
                     }
 

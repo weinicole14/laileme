@@ -283,8 +283,10 @@ private fun calcPeriodStatus(dateMs: Long, records: List<PeriodRecord>): PeriodS
         val endMs = if (record.endDate != null) {
             normalizeDate(record.endDate)
         } else {
-            // 没有 endDate → startDate + (periodLength-1) 天
-            startMs + (record.periodLength - 1) * 24L * 60 * 60 * 1000
+            // 没有 endDate（活跃经期）→ 延续到今天或预计结束日的较大值
+            // 用户未手动结束前，一直标记为经期
+            val todayMs2 = normalizeDate(System.currentTimeMillis())
+            maxOf(startMs + (record.periodLength - 1) * 24L * 60 * 60 * 1000, todayMs2)
         }
         if (dateMs in startMs..endMs) {
             return PeriodStatus(isPeriod = true)

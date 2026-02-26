@@ -2,9 +2,9 @@ package com.laileme.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// 柔和配色方案
-val PrimaryPink = Color(0xFFFF8A9B)      // 主粉色
-val LightPink = Color(0xFFFFE4E8)        // 浅粉背景
+// 柔和配色方案 — 主色调跟随主题动态变化
+val PrimaryPink: Color get() = ThemeManager.currentPrimary       // 主色（动态）
+val LightPink: Color get() = ThemeManager.currentLightPrimary    // 浅色背景（动态）
 val AccentTeal = Color(0xFF5ECFB1)       // 薄荷绿强调色
 val AccentOrange = Color(0xFFFFB347)     // 橙色
 val AccentBlue = Color(0xFF87CEEB)       // 天蓝色
@@ -25,7 +25,7 @@ val TextSecondary = Color(0xFF636E72)    // 次要文字
 val TextHint = Color(0xFFB2BEC3)         // 提示文字
 
 val TodayGreen = Color(0xFF5ECFB1)       // 今天标记
-val WeekendText = Color(0xFFFF8A9B)      // 周末文字颜色
+val WeekendText: Color get() = ThemeManager.currentPrimary  // 周末文字颜色（跟随主题）
 
-val NavSelected = Color(0xFFFF8A9B)      // 导航选中
+val NavSelected: Color get() = ThemeManager.currentPrimary  // 导航选中（跟随主题）
 val NavUnselected = Color(0xFFB2BEC3)    // 导航未选中
