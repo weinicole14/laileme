@@ -1,0 +1,37 @@
+name: macOS SSH Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: 'Session timeout in minutes (max 350)'
+        required: false
+        default: '350'
+
+jobs:
+  macos-ssh:
+    runs-on: macos-14
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show system info
+        run: |
+          echo "=== macOS Version ==="
+          sw_vers
+          echo "=== Xcode Version ==="
+          xcodebuild -version
+          echo "=== Available Simulators ==="
+          xcrun simctl list devices available | head -20
+          echo "=== Disk Space ==="
+          df -h /
+          echo "=== Memory ==="
+          sysctl hw.memsize
+
+      - name: Setup tmate SSH session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: ${{ github.event.inputs.timeout || 350 }}
+        with:
+          limit-access-to-actor: true
