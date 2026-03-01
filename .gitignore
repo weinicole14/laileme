@@ -1,12 +1,7 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+/.idea/
 .DS_Store
 /build
 /captures
@@ -15,11 +10,20 @@
 local.properties
 /app/build
 *.apk
-.backup/
+
+# 签名密钥（绝不上传）
+*.jks
+*.keystore
+
+# 服务器脚本和补丁
+fix_*.py
+*_patch.js
+
+# Operit 和 Backup
 .operit/
+.backup/
 bunny.png
-local.properties
 setup_android_env.sh
-\n# Operit and Backup
-.operit/
-.backup/
+
+# iOS 单独管理
+ios/
