@@ -79,8 +79,10 @@ fun SettingsContent(
     // showPrivacyPolicy, showServiceAgreement, showInfoCollection 已迁移为独立页面
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showWidgetSettings by remember { mutableStateOf(false) }
+    var showSwitchAccountDialog by remember { mutableStateOf(false) }
     var showDataBackup by remember { mutableStateOf(false) }
     var showThemeColorPicker by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
 
     // 注销账号相关状态
     var showDeleteAccountWarning by remember { mutableStateOf(false) }
@@ -190,6 +192,13 @@ fun SettingsContent(
                 onClick = { showReminderSettings = true }
             )
 
+            SettingsItemWithValue(
+                icon = Icons.Outlined.Security,
+                title = "权限管理",
+                value = "查看和管理应用权限",
+                onClick = { showPermissionDialog = true }
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // ── 外观设置分组 ──
@@ -204,6 +213,101 @@ fun SettingsContent(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // ── 未成年保护 ──
+            val profilePrefsForMinor = remember { context.getSharedPreferences("laileme_profile", Context.MODE_PRIVATE) }
+            val settingsPrefsForMinor = remember { context.getSharedPreferences("laileme_settings", Context.MODE_PRIVATE) }
+            val autoMinor = remember {
+                try {
+                    val y = profilePrefsForMinor.getString("birth_year", "")?.toIntOrNull()
+                    val m = profilePrefsForMinor.getString("birth_month", "")?.toIntOrNull()
+                    val d = profilePrefsForMinor.getString("birth_day", "")?.toIntOrNull()
+                    if (y != null && m != null && d != null) {
+                        val now = java.util.Calendar.getInstance()
+                        var age = now.get(java.util.Calendar.YEAR) - y
+                        if (now.get(java.util.Calendar.MONTH) + 1 < m ||
+                            (now.get(java.util.Calendar.MONTH) + 1 == m && now.get(java.util.Calendar.DAY_OF_MONTH) < d)) {
+                            age--
+                        }
+                        age < 18
+                    } else false
+                } catch (_: Exception) { false }
+            }
+            var isMinorMode by remember {
+                val hasManualSet = settingsPrefsForMinor.contains("minor_mode")
+                val defaultValue = if (hasManualSet) settingsPrefsForMinor.getBoolean("minor_mode", false) else autoMinor
+                mutableStateOf(defaultValue)
+            }
+            var showMinorModeDialog by remember { mutableStateOf(false) }
+
+            SettingsItemWithValue(
+                icon = Icons.Outlined.ChildCare,
+                title = "未成年模式",
+                value = if (isMinorMode) "已开启" else "已关闭",
+                onClick = { showMinorModeDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 未成年模式弹窗
+            if (showMinorModeDialog) {
+                AlertDialog(
+                    onDismissRequest = { showMinorModeDialog = false },
+                    containerColor = Color.White,
+                    shape = RoundedCornerShape(20.dp),
+                    icon = { Icon(Icons.Outlined.ChildCare, null, tint = PrimaryPink, modifier = Modifier.size(36.dp)) },
+                    title = { Text("未成年模式", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                    text = {
+                        Column {
+                            Text(
+                                "开启后将隐藏私密日记等敏感内容，保护未成年人健康成长。",
+                                fontSize = 14.sp,
+                                color = TextSecondary,
+                                lineHeight = 20.sp
+                            )
+                            if (autoMinor) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "根据档案年龄检测到你可能未满18岁，已自动开启。",
+                                    fontSize = 12.sp,
+                                    color = TextHint
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    if (isMinorMode) "当前已开启" else "当前已关闭",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextPrimary
+                                )
+                                Switch(
+                                    checked = isMinorMode,
+                                    onCheckedChange = { checked ->
+                                        isMinorMode = checked
+                                        settingsPrefsForMinor.edit()
+                                            .putBoolean("minor_mode", checked)
+                                            .apply()
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = PrimaryPink
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showMinorModeDialog = false }) {
+                            Text("关闭", color = PrimaryPink, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
+            }
 
             // ── 数据与隐私分组 ──
             SettingsSectionTitle("数据与隐私")
@@ -227,6 +331,12 @@ fun SettingsContent(
 
             // ── 账户设置分组 ──
             SettingsSectionTitle("账户设置")
+
+            SettingsItem(
+                icon = Icons.Outlined.SwitchAccount,
+                title = "切换账号",
+                onClick = { showSwitchAccountDialog = true }
+            )
 
             SettingsItem(
                 icon = Icons.Outlined.VpnKey,
@@ -309,6 +419,158 @@ fun SettingsContent(
         ReminderSettingsDialog(
             prefs = reminderPrefs,
             onDismiss = { showReminderSettings = false }
+        )
+    }
+
+    // 权限管理对话框
+    if (showPermissionDialog) {
+        val permContext = context
+        val hasActivityRecog = PackageManager.PERMISSION_GRANTED ==
+            ContextCompat.checkSelfPermission(permContext, Manifest.permission.ACTIVITY_RECOGNITION)
+        val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            PackageManager.PERMISSION_GRANTED ==
+                ContextCompat.checkSelfPermission(permContext, Manifest.permission.POST_NOTIFICATIONS)
+        } else true
+        val hasBatterySaver = run {
+            val pm = permContext.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.isIgnoringBatteryOptimizations(permContext.packageName) ?: true
+        }
+        val hasBodySensors = PackageManager.PERMISSION_GRANTED ==
+            ContextCompat.checkSelfPermission(permContext, Manifest.permission.BODY_SENSORS)
+
+        val brandName = com.laileme.app.util.AutoStartHelper.getBrandName()
+
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(
+                    Icons.Outlined.Security,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = AccentTeal
+                )
+            },
+            title = {
+                Text("权限管理", fontWeight = FontWeight.Bold, color = TextPrimary)
+            },
+            text = {
+                Column {
+                    // 当前品牌提示
+                    Text(
+                        "当前设备：$brandName",
+                        fontSize = 11.sp,
+                        color = TextHint,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    SettingsPermissionRow("运动识别", "记录步数和运动数据", hasActivityRecog)
+                    SettingsPermissionRow("通知权限", "显示提醒和步数通知", hasNotification)
+                    SettingsPermissionRow("电池优化", "后台持续记录步数", hasBatterySaver)
+                    SettingsPermissionRow("身体传感器", "读取计步传感器数据", hasBodySensors)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color(0xFFF0F0F0))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        "后台保活设置",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        "根据个人意愿开启",
+                        fontSize = 11.sp,
+                        color = TextHint,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+
+                    // 自启动管理
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AccentTeal.copy(alpha = 0.06f))
+                            .clickable {
+                                val ok = com.laileme.app.util.AutoStartHelper.jumpToAutoStart(permContext)
+                                if (!ok) com.laileme.app.util.AutoStartHelper.jumpToAppDetail(permContext)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, null, modifier = Modifier.size(20.dp), tint = AccentTeal)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("自启动管理", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("允许来了么开机自启动", fontSize = 10.sp, color = TextSecondary)
+                        }
+                        Icon(Icons.Outlined.ChevronRight, null, modifier = Modifier.size(18.dp), tint = TextHint)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 后台运行/省电策略
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFFF9800).copy(alpha = 0.06f))
+                            .clickable {
+                                com.laileme.app.util.AutoStartHelper.jumpToBackgroundManager(permContext)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.BatteryChargingFull, null, modifier = Modifier.size(20.dp), tint = Color(0xFFFF9800))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("后台运行设置", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("设为「不受限制」保持后台计步", fontSize = 10.sp, color = TextSecondary)
+                        }
+                        Icon(Icons.Outlined.ChevronRight, null, modifier = Modifier.size(18.dp), tint = TextHint)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 应用详情（通用兜底）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(PrimaryPink.copy(alpha = 0.06f))
+                            .clickable {
+                                com.laileme.app.util.AutoStartHelper.jumpToAppDetail(permContext)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Settings, null, modifier = Modifier.size(20.dp), tint = PrimaryPink)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("应用详情设置", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("管理所有权限和通知", fontSize = 10.sp, color = TextSecondary)
+                        }
+                        Icon(Icons.Outlined.ChevronRight, null, modifier = Modifier.size(18.dp), tint = TextHint)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text("完成", color = AccentTeal, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {}
+        )
+    }
+
+    // 切换账号对话框
+    if (showSwitchAccountDialog) {
+        SwitchAccountDialog(
+            onDismiss = { showSwitchAccountDialog = false },
+            onSwitched = { showSwitchAccountDialog = false }
         )
     }
 
@@ -1521,6 +1783,33 @@ private fun ReminderSettingsDialog(
                     }
                 }
                 } // end if reminderGender != "male"
+
+                // ── 步数通知（所有用户可见）──
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF0F0F0))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val settingsPrefsForStep = remember { context.getSharedPreferences("laileme_settings", Context.MODE_PRIVATE) }
+                var stepNotifEnabled by remember { mutableStateOf(settingsPrefsForStep.getBoolean("step_notification", true)) }
+
+                ReminderToggleItem(
+                    icon = Icons.Outlined.DirectionsWalk,
+                    title = "步数通知",
+                    subtitle = "通知栏常驻显示今日步数",
+                    checked = stepNotifEnabled,
+                    color = Color(0xFFFF9800),
+                    onCheckedChange = { enabled ->
+                        stepNotifEnabled = enabled
+                        settingsPrefsForStep.edit().putBoolean("step_notification", enabled).apply()
+                        try {
+                            if (enabled) {
+                                com.laileme.app.service.KeepAliveService.start(context)
+                            } else {
+                                com.laileme.app.service.KeepAliveService.stop(context)
+                            }
+                        } catch (_: Exception) { }
+                    }
+                )
                 } // end else masterSwitch
             }
         },
@@ -1594,6 +1883,186 @@ private fun ReminderToggleItem(
             )
         )
     }
+}
+
+@Composable
+private fun SettingsPermissionRow(title: String, desc: String, granted: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (granted) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = if (granted) Color(0xFF4CAF50) else Color(0xFFE57373)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+            Text(desc, fontSize = 10.sp, color = TextSecondary)
+        }
+        Text(
+            if (granted) "已授权" else "未授权",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (granted) Color(0xFF4CAF50) else Color(0xFFE57373)
+        )
+    }
+}
+
+// ═══════════════════════════════════════════
+// 切换账号对话框
+// ═══════════════════════════════════════════
+
+@Composable
+private fun SwitchAccountDialog(onDismiss: () -> Unit, onSwitched: () -> Unit) {
+    val accounts = remember { com.laileme.app.data.AuthManager.getSavedAccounts() }
+    val currentUser = com.laileme.app.data.AuthManager.userState.collectAsState().value
+    val scope = rememberCoroutineScope()
+    var isSwitching by remember { mutableStateOf(false) }
+    var switchError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = { if (!isSwitching) onDismiss() },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp),
+        confirmButton = {
+            TextButton(onClick = onDismiss, enabled = !isSwitching) {
+                Text("关闭", color = TextSecondary)
+            }
+        },
+        title = {
+            Text(
+                "切换账号",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = Color(0xFF1A1A2E)
+            )
+        },
+        text = {
+            Column {
+                if (accounts.isEmpty()) {
+                    Text(
+                        "暂无已保存的账号\n登录后会自动记住账号",
+                        fontSize = 14.sp,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 20.dp)
+                    )
+                } else {
+                    accounts.forEach { account ->
+                        val isCurrent = account.userId == currentUser?.userId
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(enabled = !isCurrent && !isSwitching) {
+                                    isSwitching = true
+                                    switchError = null
+                                    scope.launch {
+                                        when (val result = com.laileme.app.data.AuthManager.switchAccount(account)) {
+                                            is com.laileme.app.data.AuthResult.Success -> {
+                                                com.laileme.app.data.AuthManager.saveAccountCredentials(account.username, account.password)
+                                                android.widget.Toast.makeText(context, "已切换到 ${account.nickname}", android.widget.Toast.LENGTH_SHORT).show()
+                                                onSwitched()
+                                            }
+                                            is com.laileme.app.data.AuthResult.Error -> {
+                                                switchError = result.message
+                                                isSwitching = false
+                                            }
+                                        }
+                                    }
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isCurrent) PrimaryPink.copy(alpha = 0.1f) else Color(0xFFF5F5F5)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // 头像圈
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (account.gender == "male") Color(0xFF4FC3F7).copy(alpha = 0.2f)
+                                            else PrimaryPink.copy(alpha = 0.2f)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Person,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = if (account.gender == "male") Color(0xFF4FC3F7) else PrimaryPink
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = account.nickname,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFF1A1A2E)
+                                    )
+                                    Text(
+                                        text = account.username + if (account.gender == "male") " · 男" else " · 女",
+                                        fontSize = 11.sp,
+                                        color = TextHint
+                                    )
+                                }
+                                if (isCurrent) {
+                                    Text(
+                                        "当前",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PrimaryPink
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isSwitching) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = PrimaryPink
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("切换中...", fontSize = 13.sp, color = TextHint)
+                    }
+                }
+
+                switchError?.let {
+                    Text(
+                        it,
+                        fontSize = 12.sp,
+                        color = Color(0xFFE53935),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+        }
+    )
 }
 
 // ═══════════════════════════════════════════
@@ -1763,7 +2232,7 @@ private fun HelpFeedbackDialog(onDismiss: () -> Unit) {
 
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                "联系方式：support@weinicole.cn",
+                                "联系方式：postmaster@weinicole.cn",
                                 fontSize = 11.sp,
                                 color = TextHint
                             )
@@ -1896,11 +2365,12 @@ private fun FaqItem(question: String, answer: String) {
 // ═══════════════════════════════════════════
 
 @Composable
-fun LegalTextPage(title: String, content: String, onBack: () -> Unit) {
+fun WebViewPage(title: String, url: String, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Background)
+            .background(Color.White)
+            .statusBarsPadding() // 防状态栏遮挡
     ) {
         // 顶部导航栏
         Surface(
@@ -1926,284 +2396,25 @@ fun LegalTextPage(title: String, content: String, onBack: () -> Unit) {
             }
         }
 
-        // 内容区域
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Text(
-                    text = content,
-                    fontSize = 14.sp,
-                    color = TextSecondary,
-                    lineHeight = 22.sp,
-                    modifier = Modifier.padding(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(24.dp))
-        }
-    }
-}
-
-// ═══════════════════════════════════════════
-// 个人信息收集清单对话框（表格）
-// ═══════════════════════════════════════════
-
-@Composable
-fun InfoCollectionPage(onBack: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Background)
-    ) {
-        // 顶部导航栏
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            shadowElevation = 2.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Outlined.ArrowBack, "返回", tint = TextPrimary)
+        // WebView 内容区域
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { context ->
+                android.webkit.WebView(context).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    settings.defaultTextEncodingName = "UTF-8"
+                    loadUrl(url)
                 }
-                Text(
-                    "个人信息收集清单",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            }
-        }
-
-        // 内容区域
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "根据《个人信息保护法》相关规定，我们将在此公示本应用收集的个人信息详情：",
-                        fontSize = 13.sp,
-                        color = TextSecondary,
-                        lineHeight = 20.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // 表格
-                    val items = listOf(
-                        InfoItem("用户名", "账号注册与登录", "必要", "服务器加密存储"),
-                        InfoItem("密码", "账号安全验证", "必要", "BCrypt加密存储"),
-                        InfoItem("昵称", "个性化显示", "可选", "服务器存储"),
-                        InfoItem("生日", "年龄计算", "可选", "本地存储"),
-                        InfoItem("身高/体重", "BMI计算", "可选", "本地存储"),
-                        InfoItem("血型", "健康档案", "可选", "本地存储"),
-                        InfoItem("经期记录", "周期预测与统计", "核心功能", "本地数据库"),
-                        InfoItem("睡眠记录", "睡眠分析与统计", "核心功能", "本地数据库"),
-                        InfoItem("日记内容", "心情记录", "可选", "本地数据库"),
-                        InfoItem("设备信息", "问题排查与适配", "自动收集", "不上传"),
-                        InfoItem("反馈内容", "改进产品服务", "用户主动提交", "服务器存储")
-                    )
-
-                    // 表头
-                    InfoTableRow(
-                        col1 = "信息类型",
-                        col2 = "用途",
-                        col3 = "必要性",
-                        col4 = "存储方式",
-                        isHeader = true
-                    )
-
-                    items.forEach { item ->
-                        InfoTableRow(
-                            col1 = item.type,
-                            col2 = item.purpose,
-                            col3 = item.necessity,
-                            col4 = item.storage,
-                            isHeader = false
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        "说明：\n" +
-                        "1. 标注「必要」的信息为提供基础服务所需，拒绝提供将无法使用相关功能。\n" +
-                        "2. 标注「可选」的信息用于提升体验，不提供不影响核心功能使用。\n" +
-                        "3. 本地存储的数据不会上传至服务器，仅保存在你的设备中。\n" +
-                        "4. 密码采用BCrypt单向加密，任何人（包括我们）均无法查看明文密码。",
-                        fontSize = 12.sp,
-                        color = TextHint,
-                        lineHeight = 18.sp
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(24.dp))
-        }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
-private data class InfoItem(
-    val type: String,
-    val purpose: String,
-    val necessity: String,
-    val storage: String
-)
 
-@Composable
-private fun InfoTableRow(
-    col1: String, col2: String, col3: String, col4: String,
-    isHeader: Boolean
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                if (isHeader) PrimaryPink.copy(alpha = 0.08f)
-                else Color.Transparent
-            )
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        val weight = if (isHeader) FontWeight.Bold else FontWeight.Normal
-        val color = if (isHeader) PrimaryPink else TextSecondary
-        val size = if (isHeader) 11.sp else 10.sp
 
-        Text(col1, fontSize = size, fontWeight = weight, color = color,
-            modifier = Modifier.weight(1f))
-        Text(col2, fontSize = size, fontWeight = weight, color = color,
-            modifier = Modifier.weight(1.2f))
-        Text(col3, fontSize = size, fontWeight = weight, color = color,
-            modifier = Modifier.weight(0.8f))
-        Text(col4, fontSize = size, fontWeight = weight, color = color,
-            modifier = Modifier.weight(1f))
-    }
-    if (!isHeader) {
-        HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
-    }
-}
-
-// ═══════════════════════════════════════════
-// 隐私政策文本
-// ═══════════════════════════════════════════
-
-internal val privacyPolicyContent = """
-来了么 隐私政策
-
-更新日期：2025年6月
-
-我们深知个人信息对您的重要性，我们将按照法律法规要求，采取相应安全措施，保护您的个人信息安全。
-
-一、我们收集的信息
-为提供服务，我们可能收集以下信息：
-1. 账号信息：用户名、昵称、密码（加密存储）；
-2. 健康数据：经期记录、睡眠记录等您主动输入的数据；
-3. 日记内容：您在日记功能中记录的文字内容；
-4. 设备信息：设备型号、操作系统版本（仅用于适配和问题排查）。
-
-二、信息的使用
-我们收集的信息仅用于：
-1. 提供和改善应用功能；
-2. 保障账号安全；
-3. 进行必要的数据分析以优化服务。
-
-三、信息的存储与保护
-1. 您的数据存储在安全的服务器上，我们采用业界通行的加密技术保护数据传输安全；
-2. 密码经过加密处理存储，任何人（包括我们）都无法查看您的明文密码；
-3. 我们会定期备份数据，防止数据丢失。
-
-四、信息共享
-我们承诺：
-1. 未经您的同意，不会向第三方共享、出售您的个人信息；
-2. 除非法律法规要求或政府机关依法要求，我们不会披露您的个人信息；
-3. 我们不会将您的健康数据用于商业推广。
-
-五、您的权利
-您有权：
-1. 查看、修改您的个人信息；
-2. 删除您的账号及相关数据；
-3. 撤回对本隐私政策的同意（撤回后将无法继续使用服务）。
-
-六、未成年人保护
-如果您是未满14周岁的未成年人，请在监护人的陪同下阅读本隐私政策，并在取得监护人同意后使用本应用。
-
-七、隐私政策更新
-我们可能会适时更新本隐私政策，更新后的政策将在应用内通知。
-
-八、联系我们
-如您对本隐私政策有任何疑问，请通过应用内反馈渠道或邮箱 support@weinicole.cn 联系我们。
-""".trimIndent()
-
-// ═══════════════════════════════════════════
-// 服务协议文本
-// ═══════════════════════════════════════════
-
-internal val serviceAgreementContent = """
-来了么 服务协议
-
-更新日期：2025年6月
-
-欢迎使用「来了么」应用（以下简称"本应用"）。在使用本应用之前，请您仔细阅读以下条款。
-
-一、服务说明
-本应用为用户提供经期管理、睡眠记录、日记等健康生活辅助功能。本应用的所有功能仅供参考，不构成任何医疗建议。
-
-二、账号注册与使用
-1. 用户注册时应提供真实、准确的信息。
-2. 用户应妥善保管账号密码，因用户保管不善导致的损失由用户自行承担。
-3. 用户不得将账号转让、出借给他人使用。
-4. 一个自然人只能注册一个账号，不得批量注册。
-
-三、用户行为规范
-用户在使用本应用时，不得：
-1. 利用本应用从事违法违规活动；
-2. 干扰、破坏本应用的正常运行；
-3. 未经授权访问本应用的系统或数据；
-4. 发布任何违法、有害、威胁、滥用、骚扰、侵权的内容；
-5. 利用技术手段恶意攻击、入侵本应用服务器。
-
-四、知识产权
-本应用的所有内容，包括但不限于文字、图片、界面设计、程序代码等，均受知识产权法律保护，未经许可不得复制、修改或传播。
-
-五、免责声明
-1. 本应用提供的健康数据记录功能仅供参考，不能替代专业医疗诊断。
-2. 因不可抗力、系统维护等原因导致的服务中断，本应用不承担责任。
-3. 用户因违反本协议导致的任何损失，由用户自行承担。
-4. 本应用不对用户数据的绝对安全性作出保证，但会尽最大努力保障数据安全。
-
-六、账号注销
-1. 用户有权申请注销账号，注销后相关数据将被删除且无法恢复。
-2. 注销前请确保已备份重要数据。
-
-七、协议修改
-本应用有权在必要时修改本协议，修改后的协议将在应用内公布。用户继续使用本应用即视为同意修改后的协议。
-
-八、法律适用与争议解决
-本协议的解释与适用，以及与本协议有关的争议，均适用中华人民共和国法律。
-
-九、联系方式
-如有任何疑问，请通过应用内的反馈渠道或邮箱 support@weinicole.cn 与我们联系。
-""".trimIndent()
 
 // ══════════════ 修改密码弹窗 ══════════════
 
@@ -2642,6 +2853,7 @@ private fun DataBackupDialog(onDismiss: () -> Unit) {
                     val periods = db.periodDao().getAllList()
                     val diaries = db.diaryDao().getAllList()
                     val sleepRecords = db.sleepDao().getAll().first()
+                    val secretRecords = db.secretDao().getAll().first()
 
                     val profilePrefs = context.getSharedPreferences("laileme_profile", Context.MODE_PRIVATE)
                     val settingsPrefs = context.getSharedPreferences("laileme_settings", Context.MODE_PRIVATE)
@@ -2805,6 +3017,12 @@ private fun DataBackupDialog(onDismiss: () -> Unit) {
 
                     var totalCount = 0
 
+                    // 先清空所有旧数据，避免重复
+                    db.periodDao().deleteAllRecords()
+                    db.diaryDao().deleteAll()
+                    db.sleepDao().deleteAll()
+                    db.secretDao().deleteAll()
+
                     // 恢复经期记录
                     val periodsArr = json.optJSONArray("periodRecords")
                     if (periodsArr != null) {
@@ -2851,7 +3069,6 @@ private fun DataBackupDialog(onDismiss: () -> Unit) {
                         }
                         totalCount += diariesArr.length()
                     }
-
                     // 恢复睡眠记录
                     val sleepArr = json.optJSONArray("sleepRecords")
                     if (sleepArr != null) {
@@ -2864,6 +3081,23 @@ private fun DataBackupDialog(onDismiss: () -> Unit) {
                             ))
                         }
                         totalCount += sleepArr.length()
+                    }
+
+                    // 恢复私密日记
+                    val secretsArr = json.optJSONArray("secretRecords")
+                    if (secretsArr != null) {
+                        for (i in 0 until secretsArr.length()) {
+                            val s = secretsArr.getJSONObject(i)
+                            db.secretDao().insert(com.laileme.app.data.entity.SecretRecord(
+                                date = s.getLong("date"),
+                                hadSex = s.optBoolean("hadSex", false),
+                                protection = s.optString("protection", ""),
+                                feeling = s.optInt("feeling", 0),
+                                mood = s.optString("mood", ""),
+                                notes = s.optString("notes", "")
+                            ))
+                        }
+                        totalCount += secretsArr.length()
                     }
 
                     resultMsg = "导入成功，共恢复 $totalCount 条记录"
@@ -2932,11 +3166,12 @@ private fun DataBackupDialog(onDismiss: () -> Unit) {
                         resultMsg = null
                         scope.launch {
                             try {
-                                val db = AppDatabase.getDatabase(context)
                                 // 删除本地数据
+                                val db = AppDatabase.getDatabase(context)
                                 db.periodDao().deleteAllRecords()
                                 db.sleepDao().deleteAll()
                                 db.diaryDao().deleteAll()
+                                db.secretDao().deleteAll()
 
                                 // 清除个人档案 SharedPreferences
                                 context.getSharedPreferences("laileme_profile", Context.MODE_PRIVATE).edit().clear().apply()

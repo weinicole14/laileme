@@ -306,4 +306,73 @@ object AuthManager {
         _userState.value = null
         prefs.edit().clear().apply()  // 同时清除token
     }
+
+    // ═══════ 多账号切换 ═══════
+
+    data class SavedAccount(
+        val username: String,
+        val password: String,
+        val nickname: String,
+        val gender: String,
+        val userId: String
+    )
+
+    /** 保存账号密码到本地列表（登录成功时自动调用） */
+    fun saveAccountCredentials(username: String, password: String) {
+        if (!::appContext.isInitialized) return
+        val sp = appContext.getSharedPreferences("laileme_accounts", Context.MODE_PRIVATE)
+        val existing = sp.getString("accounts_json", "[]") ?: "[]"
+        try {
+            val arr = org.json.JSONArray(existing)
+            // 检查是否已存在，更新密码
+            var found = false
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.getString("username") == username) {
+                    obj.put("password", password)
+                    obj.put("nickname", _userState.value?.nickname ?: username)
+                    obj.put("gender", _userState.value?.gender ?: "female")
+                    obj.put("userId", _userState.value?.userId ?: "")
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                arr.put(org.json.JSONObject().apply {
+                    put("username", username)
+                    put("password", password)
+                    put("nickname", _userState.value?.nickname ?: username)
+                    put("gender", _userState.value?.gender ?: "female")
+                    put("userId", _userState.value?.userId ?: "")
+                })
+            }
+            sp.edit().putString("accounts_json", arr.toString()).apply()
+        } catch (_: Exception) { }
+    }
+
+    /** 获取已保存的账号列表 */
+    fun getSavedAccounts(): List<SavedAccount> {
+        if (!::appContext.isInitialized) return emptyList()
+        val sp = appContext.getSharedPreferences("laileme_accounts", Context.MODE_PRIVATE)
+        val json = sp.getString("accounts_json", "[]") ?: "[]"
+        return try {
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                SavedAccount(
+                    username = obj.getString("username"),
+                    password = obj.getString("password"),
+                    nickname = obj.optString("nickname", obj.getString("username")),
+                    gender = obj.optString("gender", "female"),
+                    userId = obj.optString("userId", "")
+                )
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** 切换账号：先登出，再用保存的密码自动登录 */
+    suspend fun switchAccount(account: SavedAccount): AuthResult {
+        logout()
+        return login(account.username, account.password)
+    }
 }

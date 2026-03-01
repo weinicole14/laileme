@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.laileme.app"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 12
         versionName = "beta2.1"
@@ -101,6 +101,9 @@ dependencies {
 
     // Coil 图片加载（Compose）
     implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // Health Connect（读取系统运动健康数据）
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha02")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

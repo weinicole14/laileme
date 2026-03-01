@@ -195,6 +195,7 @@ app.get("/api/partner/data", verifyToken, (req, res) => {
             periodRecords: syncData.periodRecords || [],
             diaryEntries: [],
             sleepRecords: syncData.sleepRecords || [],
+            healthData: syncData.healthData || {},
             lastSync: syncData.lastSync || null
         }));
     } catch (e) {

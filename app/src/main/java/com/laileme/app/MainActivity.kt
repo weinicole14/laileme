@@ -90,6 +90,19 @@ class MainActivity : ComponentActivity() {
             com.laileme.app.data.RemoteAuthService("http://47.123.5.171:8080/")
         )
 
+        // 启动前台保活服务（常驻通知栏 + 后台计步）
+        // Android 14+ 要求 foregroundServiceType=health 必须先有运动权限
+        try {
+            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.ACTIVITY_RECOGNITION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (hasPermission && !com.laileme.app.service.KeepAliveService.isRunning(this)) {
+                com.laileme.app.service.KeepAliveService.start(this)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "启动保活服务失败: ${e.message}")
+        }
+
         setContent {
             LailemeTheme {
                 // ── 开屏界面状态 ──
@@ -115,9 +128,9 @@ class MainActivity : ComponentActivity() {
                 // 根据性别决定可见的导航项（男性隐藏"记录"和"发现"）
                 val userGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
                 val visibleNavItems = remember(userGender) {
-                    if (userGender == "male") {
-                        listOf(NavItem.HOME, NavItem.CALENDAR, NavItem.STATS, NavItem.PROFILE)
-                    } else {
+            if (userGender == "male") {
+                listOf(NavItem.HOME, NavItem.CALENDAR, NavItem.STATS, NavItem.DISCOVER, NavItem.PROFILE)
+            } else {
                         NavItem.entries.toList()
                     }
                 }

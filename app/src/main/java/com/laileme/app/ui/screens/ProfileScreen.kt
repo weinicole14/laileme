@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -80,7 +81,15 @@ fun ProfileScreen(
     // 二级页面拦截系统返回键，返回主页面
     BackHandler(enabled = currentPage != ProfilePage.MAIN) {
         previousPage = currentPage
-        currentPage = ProfilePage.MAIN
+        
+        // 如果是在三级页面（法律文本），或者其它从设置进来的页面，按返回键退回设置页
+        if (currentPage == ProfilePage.PRIVACY_POLICY || 
+            currentPage == ProfilePage.SERVICE_AGREEMENT || 
+            currentPage == ProfilePage.INFO_COLLECTION) {
+            currentPage = ProfilePage.SETTINGS
+        } else {
+            currentPage = ProfilePage.MAIN
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -215,23 +224,25 @@ fun ProfileScreen(
                         currentPage = ProfilePage.MAIN
                     }
                 )
-                ProfilePage.PRIVACY_POLICY -> LegalTextPage(
+                ProfilePage.PRIVACY_POLICY -> WebViewPage(
                     title = "隐私政策",
-                    content = privacyPolicyContent,
+                    url = "file:///android_asset/privacy/privacy_policy.html",
                     onBack = {
                         previousPage = ProfilePage.PRIVACY_POLICY
                         currentPage = ProfilePage.SETTINGS
                     }
                 )
-                ProfilePage.SERVICE_AGREEMENT -> LegalTextPage(
+                ProfilePage.SERVICE_AGREEMENT -> WebViewPage(
                     title = "服务协议",
-                    content = serviceAgreementContent,
+                    url = "file:///android_asset/privacy/service_agreement.html",
                     onBack = {
                         previousPage = ProfilePage.SERVICE_AGREEMENT
                         currentPage = ProfilePage.SETTINGS
                     }
                 )
-                ProfilePage.INFO_COLLECTION -> InfoCollectionPage(
+                ProfilePage.INFO_COLLECTION -> WebViewPage(
+                    title = "个人信息收集清单",
+                    url = "file:///android_asset/privacy/personal_info_list.html",
                     onBack = {
                         previousPage = ProfilePage.INFO_COLLECTION
                         currentPage = ProfilePage.SETTINGS
@@ -294,6 +305,8 @@ private fun ProfileContent(
                             .putString("partnerAvatarUrl", info.partnerAvatarUrl)
                             .putString("partnerGender", info.partnerGender)
                             .apply()
+                        // 刷新小部件
+                        context.sendBroadcast(Intent(com.laileme.app.widget.DashboardWidgetProvider.ACTION_REFRESH).setPackage(context.packageName))
                     } else {
                         partnerInfoForAvatar = null
                         cachedPartnerInfo = null
@@ -815,10 +828,10 @@ private fun ProfileContent(
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "小兔礼盒",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PrimaryPink
+text = "小兔礼赠",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PrimaryPink
                     )
                     Text(
                         text = "解锁更多功能，支持开发者",
@@ -1538,7 +1551,7 @@ private fun AboutContent(onBack: () -> Unit) {
                 title = "联系我们",
                 content = "如果你有任何建议、问题或者想跟我们说的话，\n" +
                     "欢迎通过以下方式联系：\n\n" +
-                    "邮箱：support@weinicole.cn\n" +
+                    "邮箱：postmaster@weinicole.cn\n" +
                     "官网：weinicole.cn"
             )
 
@@ -2064,7 +2077,7 @@ private fun PremiumContent(onBack: () -> Unit, onOpenLogin: () -> Unit = {}) {
             },
             icon = { Icon(Icons.Outlined.CheckCircle, null, tint = AccentTeal, modifier = Modifier.size(48.dp)) },
             title = { Text("开通成功！", fontWeight = FontWeight.Bold) },
-            text = { Text("感谢你的支持～小兔礼盒已为你开启全部权益 ♡", color = TextSecondary) },
+            text = { Text("感谢你的支持～小兔礼赠已为你开启全部权益 ♡", color = TextSecondary) },
             shape = RoundedCornerShape(20.dp)
         )
     }
@@ -2115,7 +2128,7 @@ private fun PremiumContent(onBack: () -> Unit, onOpenLogin: () -> Unit = {}) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = "小兔礼盒",
+            text = "小兔礼赠",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
@@ -2163,7 +2176,7 @@ private fun PremiumContent(onBack: () -> Unit, onOpenLogin: () -> Unit = {}) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "小兔礼盒",
+            text = "小兔礼赠",
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
                 color = PrimaryPink

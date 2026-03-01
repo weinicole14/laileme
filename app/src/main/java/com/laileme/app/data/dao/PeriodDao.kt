@@ -27,6 +27,10 @@ interface PeriodDao {
     @Query("SELECT * FROM period_records ORDER BY startDate DESC")
     suspend fun getAllList(): List<PeriodRecord>
 
+    /** 获取所有记录（阻塞版本，用于Service） */
+    @Query("SELECT * FROM period_records ORDER BY startDate DESC")
+    fun getAllRecordsSync(): List<PeriodRecord>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(record: PeriodRecord): Long
 

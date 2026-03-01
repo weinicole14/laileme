@@ -172,12 +172,13 @@ object SyncManager {
 
         val db = AppDatabase.getDatabase(context)
 
-        // 收集本地所有数据
-        val periods = db.periodDao().getAllList()
-        val diaries = db.diaryDao().getAllList()
-        val sleepRecords = db.sleepDao().getAll().first()
+            // 收集本地所有数据
+            val periods = db.periodDao().getAllList()
+            val diaries = db.diaryDao().getAllList()
+            val sleepRecords = db.sleepDao().getAll().first()
+            val secretRecords = db.secretDao().getAll().first()
 
-        // 收集个人档案数据
+            // 收集个人档案数据
         val profilePrefs = context.getSharedPreferences("laileme_profile", Context.MODE_PRIVATE)
         val profileData = JSONObject().apply {
             put("nickname", profilePrefs.getString("nickname", "") ?: "")
@@ -203,6 +204,29 @@ object SyncManager {
         val discoverData = JSONObject().apply {
             put("medications", discoverPrefs.getString("medications", "") ?: "")
             put("water_goal", discoverPrefs.getInt("water_goal", 8))
+            put("habits", discoverPrefs.getString("habits", "") ?: "")
+            put("habit_checkins", discoverPrefs.getString("habit_checkins", "") ?: "")
+        }
+
+        // 收集步数/运动数据（最近7天）
+        val userId = AuthManager.userState.value?.userId ?: "default"
+        val healthPrefs = context.getSharedPreferences("laileme_health_$userId", Context.MODE_PRIVATE)
+        val healthData = JSONObject()
+        val cal = java.util.Calendar.getInstance()
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        for (i in 0 until 7) {
+            val dayKey = sdf.format(cal.time)
+            val steps = healthPrefs.getInt("steps_$dayKey", 0)
+            val calories = healthPrefs.getInt("calories_$dayKey", 0)
+            val exercise = healthPrefs.getInt("exercise_$dayKey", 0)
+            if (steps > 0 || calories > 0) {
+                healthData.put(dayKey, JSONObject().apply {
+                    put("steps", steps)
+                    put("calories", calories)
+                    put("exercise", exercise)
+                })
+            }
+            cal.add(java.util.Calendar.DAY_OF_YEAR, -1)
         }
 
         // 安全检查：如果本地数据和设置全空，可能是刚装好还没恢复，跳过上传
@@ -222,6 +246,7 @@ object SyncManager {
             put("profile", profileData)
             put("settings", settingsData)
             put("discover", discoverData)
+            put("healthData", healthData)
             put("periodRecords", JSONArray().apply {
                 periods.forEach { r ->
                     put(JSONObject().apply {
@@ -268,9 +293,21 @@ object SyncManager {
                     })
                 }
             })
+            put("secretRecords", JSONArray().apply {
+                secretRecords.forEach { r ->
+                    put(JSONObject().apply {
+                        put("date", r.date)
+                        put("hadSex", r.hadSex)
+                        put("protection", r.protection)
+                        put("feeling", r.feeling)
+                        put("mood", r.mood)
+                        put("notes", r.notes)
+                    })
+                }
+            })
         }
 
-        Log.i(TAG, "准备上传: periods=${periods.size}, diaries=${diaries.size}, sleep=${sleepRecords.size}")
+        Log.i(TAG, "准备上传: periods=${periods.size}, diaries=${diaries.size}, sleep=${sleepRecords.size}, secrets=${secretRecords.size}")
 
         // 发送到服务器
         val url = URL("$BASE_URL/api/sync/upload")
@@ -297,7 +334,7 @@ object SyncManager {
             if (resp.optBoolean("success", false)) {
                 val lastSync = resp.optJSONObject("data")?.optString("lastSync", "") ?: ""
                 getPrefs(context).edit().putString(KEY_LAST_SYNC, lastSync).apply()
-                Log.i(TAG, "上传成功: $lastSync (periods=${periods.size}, diaries=${diaries.size}, sleep=${sleepRecords.size})")
+                Log.i(TAG, "上传成功: $lastSync (periods=${periods.size}, diaries=${diaries.size}, sleep=${sleepRecords.size}, secrets=${secretRecords.size})")
             } else {
                 throw Exception(resp.optString("message", "同步失败"))
             }
@@ -369,8 +406,10 @@ object SyncManager {
                     discoverPrefs.edit()
                         .putString("medications", discover.optString("medications", ""))
                         .putInt("water_goal", discover.optInt("water_goal", 8))
+                        .putString("habits", discover.optString("habits", ""))
+                        .putString("habit_checkins", discover.optString("habit_checkins", ""))
                         .apply()
-                    Log.i(TAG, "药物提醒恢复成功")
+                    Log.i(TAG, "药物提醒和习惯打卡恢复成功")
                 }
 
             // 恢复经期记录（先清空再插入，避免重复）
@@ -437,7 +476,52 @@ object SyncManager {
                     Log.i(TAG, "恢复睡眠记录: ${sleepArr.length()} 条")
                 }
 
-                val totalRecords = (periodsArr?.length() ?: 0) + (diariesArr?.length() ?: 0) + (sleepArr?.length() ?: 0)
+                // 恢复私密日记记录
+                val secretsArr = data.optJSONArray("secretRecords")
+                if (secretsArr != null && secretsArr.length() > 0) {
+                    db.secretDao().deleteAll()
+                    for (i in 0 until secretsArr.length()) {
+                        val s = secretsArr.getJSONObject(i)
+                        db.secretDao().insert(com.laileme.app.data.entity.SecretRecord(
+                            date = s.getLong("date"),
+                            hadSex = s.optBoolean("hadSex", false),
+                            protection = s.optString("protection", ""),
+                            feeling = s.optInt("feeling", 0),
+                            mood = s.optString("mood", ""),
+                            notes = s.optString("notes", "")
+                        ))
+                    }
+                    Log.i(TAG, "恢复私密记录: ${secretsArr.length()} 条")
+                }
+
+                // 恢复步数/运动数据
+                val healthObj = data.optJSONObject("healthData")
+                if (healthObj != null && healthObj.length() > 0) {
+            val restoreUserId = AuthManager.userState.value?.userId ?: "default"
+            val healthPrefs = context.getSharedPreferences("laileme_health_$restoreUserId", Context.MODE_PRIVATE)
+                    val editor = healthPrefs.edit()
+                    val keys = healthObj.keys()
+                    var healthCount = 0
+                    while (keys.hasNext()) {
+                        val dayKey = keys.next()
+                        val dayData = healthObj.optJSONObject(dayKey) ?: continue
+                        val steps = dayData.optInt("steps", 0)
+                        val calories = dayData.optInt("calories", 0)
+                        val exercise = dayData.optInt("exercise", 0)
+                        // 只恢复比本地大的值（避免覆盖今天已有的更新数据）
+                        val localSteps = healthPrefs.getInt("steps_$dayKey", 0)
+                        if (steps > localSteps) {
+                            editor.putInt("steps_$dayKey", steps)
+                            editor.putInt("calories_$dayKey", calories)
+                            editor.putInt("exercise_$dayKey", exercise)
+                            healthCount++
+                        }
+                    }
+                    editor.apply()
+                    Log.i(TAG, "恢复步数数据: $healthCount 天")
+                }
+
+                val totalRecords = (periodsArr?.length() ?: 0) + (diariesArr?.length() ?: 0) + (sleepArr?.length() ?: 0) + (secretsArr?.length() ?: 0)
                 Log.i(TAG, "数据恢复完成，共 $totalRecords 条记录")
                 Result.success("数据恢复成功，共 $totalRecords 条记录")
             } catch (e: Exception) {

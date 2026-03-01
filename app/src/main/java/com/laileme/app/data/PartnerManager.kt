@@ -41,6 +41,8 @@ data class PartnerData(
     val partnerNickname: String = "",
     val periodRecords: List<JSONObject> = emptyList(),
     val sleepRecords: List<JSONObject> = emptyList(),
+    val habits: String = "",
+    val habitCheckins: String = "",
     val lastSync: String? = null
 )
 
@@ -266,6 +268,8 @@ object PartnerManager {
                 partnerNickname = data.optString("partnerNickname", ""),
                 periodRecords = periods,
                 sleepRecords = sleeps,
+                habits = data.optString("habits", ""),
+                habitCheckins = data.optString("habitCheckins", ""),
                 lastSync = data.optString("lastSync", null)
             )
         } catch (e: Exception) {

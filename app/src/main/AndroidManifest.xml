@@ -4,6 +4,24 @@
 
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+<uses-permission android:name="android.permission.BODY_SENSORS" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+<!-- Health Connect 权限 -->
+<uses-permission android:name="android.permission.health.READ_STEPS" />
+<uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+<uses-permission android:name="android.permission.health.READ_EXERCISE" />
+<uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+
+    <!-- Health Connect 查询声明 -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
 android:allowBackup="true"
@@ -27,6 +45,13 @@ android:allowBackup="true"
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.FocusFullScreenActivity"
+            android:exported="false"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|screenLayout"
+            android:theme="@style/Theme.Laileme" />
 
         <!-- 桌面小部件 -->
         <receiver
@@ -54,6 +79,27 @@ android:allowBackup="true"
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_dashboard_info" />
+        </receiver>
+        <!-- 前台保活服务 -->
+        <service
+            android:name=".service.KeepAliveService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:process=":keepalive"
+            android:foregroundServiceType="health" />
+
+        <!-- 服务重启接收器 -->
+        <receiver
+            android:name=".service.RestartReceiver"
+            android:exported="false" />
+
+        <!-- 开机自启动 -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
     </application>
 

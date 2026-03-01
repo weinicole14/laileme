@@ -21,8 +21,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.ui.platform.LocalContext
+import com.laileme.app.data.AppDatabase
 import com.laileme.app.data.AuthManager
 import com.laileme.app.data.entity.DiaryEntry
+import com.laileme.app.data.entity.SecretRecord
 import com.laileme.app.ui.PeriodUiState
 import com.laileme.app.ui.normalizeDate
 import com.laileme.app.ui.components.BunnyMascot
@@ -55,6 +60,37 @@ fun CalendarScreen(
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
 
+    // 未成年模式判断
+    val context = LocalContext.current
+    val settingsPrefs = remember { context.getSharedPreferences("laileme_settings", android.content.Context.MODE_PRIVATE) }
+    val profilePrefs = remember { context.getSharedPreferences("laileme_profile", android.content.Context.MODE_PRIVATE) }
+    val isMinorMode = remember {
+        val hasManualSet = settingsPrefs.contains("minor_mode")
+        if (hasManualSet) {
+            settingsPrefs.getBoolean("minor_mode", false)
+        } else {
+            try {
+                val y = profilePrefs.getString("birth_year", "")?.toIntOrNull()
+                val m = profilePrefs.getString("birth_month", "")?.toIntOrNull()
+                val d = profilePrefs.getString("birth_day", "")?.toIntOrNull()
+                if (y != null && m != null && d != null) {
+                    val now = java.util.Calendar.getInstance()
+                    var age = now.get(java.util.Calendar.YEAR) - y
+                    if (now.get(java.util.Calendar.MONTH) + 1 < m ||
+                        (now.get(java.util.Calendar.MONTH) + 1 == m && now.get(java.util.Calendar.DAY_OF_MONTH) < d)) {
+                        age--
+                    }
+                    age < 18
+                } else false
+            } catch (_: Exception) { false }
+        }
+    }
+
+    // 读取当天的私密记录（未成年模式下不读取）
+    val db = remember { AppDatabase.getDatabase(context) }
+    val secretRecord by db.secretDao().getRecordByDate(uiState.selectedDate).collectAsState(initial = null)
+    val effectiveSecretRecord = if (isMinorMode) null else secretRecord
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -69,7 +105,7 @@ fun CalendarScreen(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
         ) {
-            CalendarCard(uiState, onDateSelected, onMonthChange)
+            CalendarCard(uiState, onDateSelected, onMonthChange, isMinorMode)
             LegendSection()
             // 预测免责提示
             Text(
@@ -83,7 +119,8 @@ fun CalendarScreen(
             )
             DiaryViewSection(
                 selectedDate = uiState.selectedDate,
-                diaryEntry = diaryEntry
+                diaryEntry = diaryEntry,
+                secretRecord = effectiveSecretRecord
             )
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -155,8 +192,18 @@ private fun CountdownBubble(uiState: PeriodUiState) {
 private fun CalendarCard(
     uiState: PeriodUiState,
     onDateSelected: (Long) -> Unit,
-    onMonthChange: (Int) -> Unit
+    onMonthChange: (Int) -> Unit,
+    isMinorMode: Boolean = false
 ) {
+    // 读取爱爱记录（hadSex=true的日期），未成年模式下不显示
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+    val secretRecords by db.secretDao().getAll().collectAsState(initial = emptyList())
+    val intimacyDates = remember(secretRecords, isMinorMode) {
+        if (isMinorMode) emptySet()
+        else secretRecords.filter { it.hadSex }.map { normalizeDate(it.date) }.toSet()
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -170,7 +217,8 @@ private fun CalendarCard(
             records = uiState.records,
             selectedDate = uiState.selectedDate,
             onDateSelected = onDateSelected,
-            onMonthChange = onMonthChange
+            onMonthChange = onMonthChange,
+            intimacyDates = intimacyDates
         )
     }
 }
@@ -301,7 +349,8 @@ private fun ActionButton(icon: ImageVector, label: String, color: Color, onClick
 @Composable
 private fun DiaryViewSection(
     selectedDate: Long,
-    diaryEntry: DiaryEntry?
+    diaryEntry: DiaryEntry?,
+    secretRecord: SecretRecord? = null
 ) {
     val dateFormat = SimpleDateFormat("M月d日", Locale.CHINESE)
 
@@ -339,7 +388,101 @@ private fun DiaryViewSection(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            if (diaryEntry == null) {
+            // 先展示爱爱记录（独立板块，不受日记是否为空影响）
+            if (secretRecord != null && secretRecord.hadSex) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color(0xFFE53935)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("亲密记录", fontSize = 11.sp, color = TextSecondary)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (secretRecord.protection.isNotEmpty()) {
+                        val protLabel = when (secretRecord.protection) {
+                            "none" -> "无措施"; "condom" -> "安全套"; "pill" -> "药物"
+                            "iud" -> "避孕环"; "safe_period" -> "安全期"; "other" -> "其他"
+                            else -> secretRecord.protection
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFE53935).copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                "避孕: $protLabel",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontSize = 10.sp,
+                                color = Color(0xFFE53935),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    if (secretRecord.feeling > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFE53935).copy(alpha = 0.1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("体验 ", fontSize = 10.sp, color = Color(0xFFE53935), fontWeight = FontWeight.Medium)
+                                repeat(5) { i ->
+                                    Icon(
+                                        imageVector = if (i < secretRecord.feeling) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(10.dp),
+                                        tint = if (i < secretRecord.feeling) Color(0xFFE53935) else Color(0xFFE0E0E0)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (secretRecord.mood.isNotEmpty()) {
+                        val moodLabel = when (secretRecord.mood) {
+                            "happy" -> "开心"; "sweet" -> "甜蜜"; "tired" -> "疲惫"
+                            "normal" -> "平淡"; "awkward" -> "尴尬"; else -> secretRecord.mood
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFE53935).copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                "心情: $moodLabel",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontSize = 10.sp, color = Color(0xFFE53935), fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                if (secretRecord.notes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFFFF0F0)
+                    ) {
+                        Text(
+                            secretRecord.notes,
+                            modifier = Modifier.padding(10.dp),
+                            fontSize = 11.sp, color = TextPrimary, lineHeight = 16.sp
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (diaryEntry == null && (secretRecord == null || !secretRecord.hadSex)) {
                 // 无记录提示
                 Box(
                     modifier = Modifier
@@ -356,20 +499,12 @@ private fun DiaryViewSection(
                             tint = TextHint
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            "该日期暂无记录",
-                            fontSize = 12.sp,
-                            color = TextHint
-                        )
+                        Text("该日期暂无记录", fontSize = 12.sp, color = TextHint)
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            "可前往「记录」页面添加~",
-                            fontSize = 10.sp,
-                            color = TextHint
-                        )
+                        Text("可前往「记录」页面添加~", fontSize = 10.sp, color = TextHint)
                     }
                 }
-            } else {
+            } else if (diaryEntry != null) {
                 // ── 心情展示 ──
                 if (diaryEntry.mood.isNotEmpty()) {
                     val moodMatch = moodOptions.find { it.key == diaryEntry.mood }

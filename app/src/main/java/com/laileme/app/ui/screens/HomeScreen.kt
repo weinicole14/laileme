@@ -26,6 +26,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -97,6 +99,358 @@ fun HomeScreen(
     var showModeDialog by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showManualSetupDialog by remember { mutableStateOf(false) }
+
+    // ── 运动统计详情页 ──
+    var showExerciseStats by remember { mutableStateOf(false) }
+
+    // ── 运动健康模式 ──
+    var isHealthMode by remember { mutableStateOf(false) }
+    // ── 运动数据 ──
+    val stepsGoal = 7500
+    val caloriesGoal = 500 // kcal
+    val exerciseTimeGoal = 60 // 分钟
+    val context2 = LocalContext.current
+    val currentUserId = remember {
+        context2.getSharedPreferences("laileme_auth", android.content.Context.MODE_PRIVATE)
+            .getString("user_id", "default") ?: "default"
+    }
+    val healthPrefs = remember { context2.getSharedPreferences("laileme_health_$currentUserId", android.content.Context.MODE_PRIVATE) }
+    val todayKey = remember {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        sdf.format(java.util.Date())
+    }
+    var currentSteps by remember { mutableIntStateOf(healthPrefs.getInt("steps_$todayKey", 0)) }
+    var currentCalories by remember { mutableIntStateOf(healthPrefs.getInt("calories_$todayKey", 0)) }
+    var currentExerciseTime by remember { mutableIntStateOf(healthPrefs.getInt("exercise_$todayKey", 0)) }
+    // 标记 Health Connect 是否成功读到了数据
+    var healthConnectHasData by remember { mutableStateOf(false) }
+
+    // ── 伴侣步数切换 ──
+    var showPartnerSteps by remember { mutableStateOf(false) }
+    var partnerSteps by remember { mutableIntStateOf(0) }
+    var partnerCalories by remember { mutableIntStateOf(0) }
+    var partnerExerciseTime by remember { mutableIntStateOf(0) }
+    var partnerNickname by remember { mutableStateOf("伴侣") }
+    var isLoadingPartner by remember { mutableStateOf(false) }
+    // 显示用数据（根据切换状态选择自己/伴侣）
+    val displaySteps = if (showPartnerSteps) partnerSteps else currentSteps
+    val displayCalories = if (showPartnerSteps) partnerCalories else currentCalories
+    val displayExerciseTime = if (showPartnerSteps) partnerExerciseTime else currentExerciseTime
+
+    val healthScope = rememberCoroutineScope()
+
+    // Health Connect 客户端
+    val healthConnectClient = remember {
+        try {
+            androidx.health.connect.client.HealthConnectClient.getOrCreate(context2)
+        } catch (e: Exception) { null }
+    }
+    val healthPermissions = remember {
+        setOf(
+            androidx.health.connect.client.permission.HealthPermission.getReadPermission(
+                androidx.health.connect.client.records.StepsRecord::class
+            ),
+            androidx.health.connect.client.permission.HealthPermission.getReadPermission(
+                androidx.health.connect.client.records.TotalCaloriesBurnedRecord::class
+            ),
+            androidx.health.connect.client.permission.HealthPermission.getReadPermission(
+                androidx.health.connect.client.records.ExerciseSessionRecord::class
+            ),
+            androidx.health.connect.client.permission.HealthPermission.getReadPermission(
+                androidx.health.connect.client.records.ActiveCaloriesBurnedRecord::class
+            )
+        )
+    }
+
+    // 读取 Health Connect 数据
+    suspend fun readHealthData() {
+        val client = healthConnectClient ?: return
+        try {
+            val now = java.time.Instant.now()
+            val startOfDay = java.time.LocalDate.now()
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+            val timeRange = androidx.health.connect.client.time.TimeRangeFilter.between(startOfDay, now)
+
+            val stepsResponse = client.aggregate(
+                androidx.health.connect.client.request.AggregateRequest(
+                    metrics = setOf(androidx.health.connect.client.records.StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = timeRange
+                )
+            )
+            val steps = stepsResponse[androidx.health.connect.client.records.StepsRecord.COUNT_TOTAL]?.toInt() ?: 0
+
+            if (steps > 0) {
+                healthConnectHasData = true
+                currentSteps = steps
+
+                val calResponse = client.aggregate(
+                    androidx.health.connect.client.request.AggregateRequest(
+                        metrics = setOf(androidx.health.connect.client.records.ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                        timeRangeFilter = timeRange
+                    )
+                )
+                val cal = calResponse[androidx.health.connect.client.records.ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
+                currentCalories = cal?.inKilocalories?.toInt() ?: (steps * 0.04f).toInt()
+
+                val exerciseResponse = client.readRecords(
+                    androidx.health.connect.client.request.ReadRecordsRequest(
+                        recordType = androidx.health.connect.client.records.ExerciseSessionRecord::class,
+                        timeRangeFilter = timeRange
+                    )
+                )
+                val totalMinutes = exerciseResponse.records.sumOf { record ->
+                    java.time.Duration.between(record.startTime, record.endTime).toMinutes()
+                }.toInt()
+                currentExerciseTime = if (totalMinutes > 0) totalMinutes else (steps / 100).coerceAtMost(120)
+
+                healthPrefs.edit()
+                    .putInt("steps_$todayKey", currentSteps)
+                    .putInt("calories_$todayKey", currentCalories)
+                    .putInt("exercise_$todayKey", currentExerciseTime)
+                    .apply()
+            }
+        } catch (_: Exception) { }
+    }
+
+    val healthPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        healthScope.launch { readHealthData() }
+    }
+
+    // 权限就绪标志
+    var sensorPermReady by remember { mutableStateOf(
+        android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context2, android.Manifest.permission.ACTIVITY_RECOGNITION
+            )
+    ) }
+
+    // Health Connect 权限请求 launcher（真正请求授权）
+    val healthConnectPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()
+    ) { grantedPerms ->
+        healthScope.launch {
+            if (grantedPerms.containsAll(healthPermissions)) {
+                readHealthData()
+                if (currentSteps > 0) {
+                    android.widget.Toast.makeText(context2, "✅ 已从运动健康读取 $currentSteps 步", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // ACTIVITY_RECOGNITION 运行时权限请求
+    val activityPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        sensorPermReady = true
+        isHealthMode = true
+    }
+
+    // 上传步数到云端（伴侣可见）
+    suspend fun uploadStepsToCloud() {
+        if (currentSteps <= 0) return
+        val authPrefs = context2.getSharedPreferences("laileme_auth", android.content.Context.MODE_PRIVATE)
+        val token = authPrefs.getString("token", "") ?: ""
+        if (token.isBlank()) return
+        try {
+            withContext(Dispatchers.IO) {
+                val url = java.net.URL("http://47.123.5.171:8080/api/sync/upload")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.doOutput = true
+                val body = org.json.JSONObject().apply {
+                    put("healthData", org.json.JSONObject().apply {
+                        put(todayKey, org.json.JSONObject().apply {
+                            put("steps", currentSteps)
+                            put("calories", currentCalories)
+                            put("exercise", currentExerciseTime)
+                        })
+                    })
+                }
+                conn.outputStream.bufferedWriter().use { it.write(body.toString()) }
+                conn.responseCode
+                conn.disconnect()
+            }
+        } catch (_: Exception) { }
+    }
+
+    // 获取伴侣步数数据
+    suspend fun fetchPartnerSteps() {
+        val authPrefs = context2.getSharedPreferences("laileme_auth", android.content.Context.MODE_PRIVATE)
+        val token = authPrefs.getString("token", "") ?: ""
+        if (token.isBlank()) return
+        isLoadingPartner = true
+        try {
+            withContext(Dispatchers.IO) {
+                val url = java.net.URL("http://47.123.5.171:8080/api/partner/data")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().readText()
+                    val json = org.json.JSONObject(body)
+                    if (json.optInt("code") == 200) {
+                        val data = json.optJSONObject("data")
+                        if (data != null) {
+                            partnerNickname = data.optString("partnerNickname", "伴侣")
+                            val health = data.optJSONObject("healthData")
+                            if (health != null) {
+                                // 找今天的步数
+                                val todaySdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                                val todayStr = todaySdf.format(java.util.Date())
+                                val todayData = health.optJSONObject(todayStr)
+                                if (todayData != null) {
+                                    partnerSteps = todayData.optInt("steps", 0)
+                                    partnerCalories = todayData.optInt("calories", 0)
+                                    partnerExerciseTime = todayData.optInt("exercise", todayData.optInt("exerciseTime", 0))
+                                } else {
+                                    partnerSteps = 0
+                                    partnerCalories = 0
+                                    partnerExerciseTime = 0
+                                }
+                            }
+                        }
+                    }
+                }
+                conn.disconnect()
+            }
+        } catch (_: Exception) { }
+        isLoadingPartner = false
+    }
+
+    // ── 传感器计步（兜底数据源） ──
+    val sensorManager = remember { context2.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager }
+    val stepSensor = remember { sensorManager?.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER) }
+
+    DisposableEffect(isHealthMode, stepSensor, sensorPermReady) {
+        if (!isHealthMode || stepSensor == null || sensorManager == null) {
+            onDispose { }
+        } else {
+            val listener = object : android.hardware.SensorEventListener {
+                var baseline = healthPrefs.getFloat("step_baseline_$todayKey", -1f)
+                override fun onSensorChanged(event: android.hardware.SensorEvent?) {
+                    val totalSteps = event?.values?.firstOrNull() ?: return
+                    if (baseline < 0f) {
+                        baseline = totalSteps - healthPrefs.getInt("steps_$todayKey", 0).toFloat()
+                        healthPrefs.edit().putFloat("step_baseline_$todayKey", baseline).apply()
+                    }
+                    val sensorSteps = (totalSteps - baseline).toInt().coerceAtLeast(0)
+                    if (!healthConnectHasData || sensorSteps > currentSteps) {
+                        if (sensorSteps > 0) {
+                            currentSteps = sensorSteps
+                            currentCalories = (sensorSteps * 0.04f).toInt()
+                            currentExerciseTime = (sensorSteps / 100).coerceAtMost(120)
+                            healthPrefs.edit()
+                                .putInt("steps_$todayKey", currentSteps)
+                                .putInt("calories_$todayKey", currentCalories)
+                                .putInt("exercise_$todayKey", currentExerciseTime)
+                                .apply()
+                        }
+                    }
+                }
+                override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+            }
+            sensorManager.registerListener(listener, stepSensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            onDispose { sensorManager.unregisterListener(listener) }
+        }
+    }
+
+    // 进入运动模式时：请求 Health Connect 授权 → 读数据 → 立即同步 → 定时刷新上传
+    LaunchedEffect(isHealthMode) {
+        if (isHealthMode) {
+            // 先尝试 Health Connect
+            if (healthConnectClient != null) {
+                val granted = try {
+                    healthConnectClient.permissionController.getGrantedPermissions()
+                } catch (_: Exception) { emptySet() }
+                if (granted.containsAll(healthPermissions)) {
+                    // 已有权限，直接读
+                    readHealthData()
+                } else {
+                    // 没有权限，发起授权请求（会弹荣耀运动健康授权页）
+                    healthConnectPermLauncher.launch(healthPermissions)
+                }
+            }
+            // ★ 进入运动模式立即上传一次步数 + 从云端恢复步数
+            try { uploadStepsToCloud() } catch (_: Exception) { }
+            try {
+                com.laileme.app.data.SyncManager.downloadAndRestore(context2)
+                // 恢复后刷新本地显示
+                val restoredSteps = healthPrefs.getInt("steps_$todayKey", 0)
+                val restoredCalories = healthPrefs.getInt("calories_$todayKey", 0)
+                val restoredExercise = healthPrefs.getInt("exercise_$todayKey", 0)
+                if (restoredSteps > currentSteps) {
+                    currentSteps = restoredSteps
+                    currentCalories = restoredCalories
+                    currentExerciseTime = restoredExercise
+                }
+            } catch (_: Exception) { }
+            // 定时刷新（每30秒）+ 上传
+            while (isHealthMode) {
+                delay(30_000)
+                try { readHealthData() } catch (_: Exception) { }
+                try { uploadStepsToCloud() } catch (_: Exception) { }
+            }
+        }
+    }
+    // 电池优化权限提示对话框
+    var showBatteryDialog by remember { mutableStateOf(false) }
+
+    if (showBatteryDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showBatteryDialog = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(
+                    Icons.Outlined.BatteryChargingFull,
+                    contentDescription = null,
+                    tint = Color(0xFFFF9800),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text("允许后台运行", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Text(
+                    "为了更准确地记录您的步数，需要允许「来了么」不受电池优化限制。\n\n" +
+                    "这样即使手机锁屏，也能持续为您记录步数哦～",
+                    fontSize = 13.sp,
+                    color = TextSecondary,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBatteryDialog = false
+                    try {
+                        val intent = android.content.Intent(
+                            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                        ).apply {
+                            data = android.net.Uri.parse("package:${context2.packageName}")
+                        }
+                        context2.startActivity(intent)
+                    } catch (_: Exception) { }
+                }) {
+                    Text("去设置", color = PrimaryPink, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatteryDialog = false }) {
+                    Text("暂不", color = TextSecondary)
+                }
+            }
+        )
+    }
+
     var showAlreadyStartedDialog by remember { mutableStateOf(false) }
     var alreadyDaysInput by remember { mutableStateOf("") }
     var showDrawer by remember { mutableStateOf(false) }
@@ -259,71 +613,277 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit
             )
-            // 缩小的圆环，偏移对准月亮内圈（月牙左厚右薄，内圈偏右偏上）
+
+            // ── 流星效果 ──
+            ShootingStarsEffect(modifier = Modifier.fillMaxSize())
+
+            // ── 左上角模式切换按钮 ──
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (!isHealthMode) {
+                            // 1. 先检查 ACTIVITY_RECOGNITION 权限
+                            val hasActivityPerm = android.content.pm.PackageManager.PERMISSION_GRANTED ==
+                                androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context, android.Manifest.permission.ACTIVITY_RECOGNITION
+                                )
+                            if (!hasActivityPerm) {
+                                activityPermissionLauncher.launch(android.Manifest.permission.ACTIVITY_RECOGNITION)
+                            } else {
+                                sensorPermReady = true
+                                isHealthMode = true
+                            }
+                            // 2. 请求通知权限（Android 13+）
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                val hasNotifPerm = android.content.pm.PackageManager.PERMISSION_GRANTED ==
+                                    androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context, android.Manifest.permission.POST_NOTIFICATIONS
+                                    )
+                                if (!hasNotifPerm) {
+                                    activityPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                // 3. 启动前台服务（常驻步数通知）
+                try {
+                    if (!com.laileme.app.service.KeepAliveService.isRunning(context)) {
+                        com.laileme.app.service.KeepAliveService.start(context)
+                    }
+                } catch (_: Exception) { }
+                        } else {
+                            isHealthMode = false
+                            showPartnerSteps = false
+                        }
+                    },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isHealthMode) Color(0xFFFF9800).copy(alpha = 0.15f) else PrimaryPink.copy(alpha = 0.15f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isHealthMode) Icons.Outlined.DirectionsRun else Icons.Outlined.FavoriteBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (isHealthMode) Color(0xFFFF9800) else PrimaryPink
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (isHealthMode) "运动" else "经期",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isHealthMode) Color(0xFFFF9800) else PrimaryPink
+                    )
+                }
+            }
+
+            // ── 右上角伴侣/我的切换按钮（仅运动模式显示，用alpha淡入避免抖动） ──
+            val partnerBtnAlpha by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (isHealthMode) 1f else 0f,
+                animationSpec = androidx.compose.animation.core.tween(400),
+                label = "partnerBtnAlpha"
+            )
+            if (partnerBtnAlpha > 0f) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                        .graphicsLayer { alpha = partnerBtnAlpha }
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            enabled = isHealthMode
+                        ) {
+                            showPartnerSteps = !showPartnerSteps
+                            if (showPartnerSteps) {
+                                healthScope.launch { fetchPartnerSteps() }
+                            }
+                        },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (showPartnerSteps) Color(0xFF4FC3F7).copy(alpha = 0.15f) else Color(0xFFFF9800).copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (showPartnerSteps) Icons.Outlined.Person else Icons.Outlined.Favorite,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (showPartnerSteps) Color(0xFF4FC3F7) else Color(0xFFFF9800)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (showPartnerSteps) "伴侣" else "我的",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (showPartnerSteps) Color(0xFF4FC3F7) else Color(0xFFFF9800)
+                        )
+                    }
+                }
+            }
+
+            // 缩小的圆环，偏移对准月亮内圈
+            // 翻转动画：切换时Y轴翻面180°
+            val ringRotation by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (isHealthMode) 180f else 0f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 600,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                ),
+                label = "ringRotation"
+            )
+
             Box(
                 modifier = Modifier
                     .size(115.dp)
-                    .offset(x = 18.dp, y = (-41).dp),
+                    .offset(x = 18.dp, y = (-41).dp)
+                    .graphicsLayer {
+                        rotationY = ringRotation
+                        cameraDistance = 12f * density
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                val ringGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
-                CycleRing(uiState)
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (ringGender == "male") {
-                        // 男性用户 - 显示伴侣模式
-                        if (hasRecord) {
-                            Text("伴侣", fontSize = 8.sp, color = TextHint)
-                            if (uiState.isInPeriod) {
-                                Text(
-                                    "${uiState.daysUntilPeriodEnd}",
-                                    fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PeriodRed
+                // ── 根据模式显示不同圆环 ──
+                if (isHealthMode) {
+                    HealthRing(
+                        stepsProgress = displaySteps.toFloat() / stepsGoal,
+                        caloriesProgress = displayCalories.toFloat() / caloriesGoal,
+                        exerciseProgress = displayExerciseTime.toFloat() / exerciseTimeGoal
+                    )
+                } else {
+                    CycleRing(uiState)
+                }
+
+                // ── 中间文字（反向翻转补偿，防止镜像） ──
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .offset(y = (-4).dp)
+                        .graphicsLayer {
+                            rotationY = ringRotation
+                        }
+                ) {
+                    if (isHealthMode) {
+                        // 运动健康模式中间文字（淡入淡出切换）
+                        androidx.compose.animation.Crossfade(
+                            targetState = showPartnerSteps,
+                            animationSpec = tween(300)
+                        ) { isPartner ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.widthIn(min = 80.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPartner) Icons.Outlined.Favorite else Icons.Outlined.DirectionsRun,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (isPartner) Color(0xFF4FC3F7) else Color(0xFFFF9800)
                                 )
-                                Text("天后结束", fontSize = 10.sp, color = TextSecondary)
-                            } else {
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
-                                    "${uiState.daysUntilNextPeriod}",
-                                    fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4FC3F7)
+                                    if (isPartner) partnerNickname else "步数",
+                                    fontSize = 8.sp, color = TextHint,
+                                    textAlign = TextAlign.Center
                                 )
-                                Text("天后来", fontSize = 10.sp, color = TextSecondary)
+                                if (isLoadingPartner && isPartner) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color(0xFF4FC3F7)
+                                    )
+                                } else {
+                                    Text(
+                                        "${if (isPartner) partnerSteps else currentSteps}",
+                                        fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                                        color = if (isPartner) Color(0xFF4FC3F7) else Color(0xFFFF9800),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                                Text("/ $stepsGoal", fontSize = 8.sp, color = TextHint, textAlign = TextAlign.Center)
                             }
-                            Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
-                        } else {
-                            Text("♡", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4FC3F7))
-                            Text("伴侣模式", fontSize = 10.sp, color = TextSecondary)
                         }
                     } else {
-                    // 女性用户 - 原有逻辑
-                    if (hasRecord) {
-                if (uiState.isFirstRecord && uiState.isInPeriod) {
-                    // 首次记录中（不足2条完整记录），无法预测结束时间
-                    Text("经期", fontSize = 8.sp, color = TextHint)
-                    Text("记录中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PeriodRed)
-                    Text("第${uiState.cycleDay}天", fontSize = 10.sp, color = TextSecondary)
-                } else if (uiState.isFirstRecord && !uiState.isInPeriod) {
-                    // 首次记录已结束但还没有第二次记录，无法推算周期
-                    Text("周期", fontSize = 8.sp, color = TextHint)
-                    Text("收集中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PrimaryPink)
-                    Text("等待下次记录", fontSize = 10.sp, color = TextSecondary)
-                } else if (uiState.isInPeriod) {
-                    Text("预计", fontSize = 8.sp, color = TextHint)
-                    Text(
-                        "${uiState.daysUntilPeriodEnd}",
-                        fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PeriodRed
-                    )
-                    Text("天后结束", fontSize = 10.sp, color = TextSecondary)
-                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
-                } else {
-                    Text("预计", fontSize = 8.sp, color = TextHint)
-                    Text(
-                        "${uiState.daysUntilNextPeriod}",
-                        fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PrimaryPink
-                    )
-                    Text("天后来", fontSize = 10.sp, color = TextSecondary)
-                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
-                }
-                    } else {
-                        Text("—", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextHint)
-                        Text("记录经期", fontSize = 10.sp, color = TextSecondary)
+                        // 原有经期模式文字
+                        val ringGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
+                        if (uiState.latestRecord != null) {
+                            val cycleLen = uiState.latestRecord?.cycleLength ?: 28
+                            val phase = (uiState.cycleDay.toFloat() / cycleLen).coerceIn(0f, 1f)
+                            // 根据周期阶段选择月亮icon
+                            val moonIcon = when {
+                                phase < 0.125f -> Icons.Outlined.DarkMode       // 新月
+                                phase < 0.375f -> Icons.Outlined.NightsStay     // 上弦
+                                phase < 0.625f -> Icons.Outlined.LightMode      // 满月
+                                phase < 0.875f -> Icons.Outlined.NightsStay     // 下弦
+                                else -> Icons.Outlined.DarkMode                  // 残月
+                            }
+                            val moonTint = when {
+                                phase < 0.375f -> Color(0xFF7986CB)
+                                phase < 0.625f -> Color(0xFFFDD835)
+                                else -> Color(0xFF7986CB)
+                            }
+                            Icon(
+                                imageVector = moonIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = moonTint
+                            )
+                            Spacer(modifier = Modifier.height(1.dp))
+                        }
+                        if (ringGender == "male") {
+                            if (hasRecord) {
+                                Text("伴侣", fontSize = 8.sp, color = TextHint)
+                                if (uiState.isFirstRecord && uiState.isInPeriod) {
+                                    Text("经期中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PeriodRed)
+                                    Text("第${uiState.cycleDay}天", fontSize = 10.sp, color = TextSecondary)
+                                } else if (uiState.isFirstRecord && !uiState.isInPeriod) {
+                                    Text("收集中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PrimaryPink)
+                                    Text("等待下次记录", fontSize = 10.sp, color = TextSecondary)
+                                } else if (uiState.isInPeriod) {
+                                    Text("${uiState.daysUntilPeriodEnd}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PeriodRed)
+                                    Text("天后结束", fontSize = 10.sp, color = TextSecondary)
+                                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
+                                } else {
+                                    Text("${uiState.daysUntilNextPeriod}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4FC3F7))
+                                    Text("天后来", fontSize = 10.sp, color = TextSecondary)
+                                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
+                                }
+                            } else {
+                                Text("♡", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4FC3F7))
+                                Text("伴侣模式", fontSize = 10.sp, color = TextSecondary)
+                            }
+                        } else {
+                            if (hasRecord) {
+                                if (uiState.isFirstRecord && uiState.isInPeriod) {
+                                    Text("经期", fontSize = 8.sp, color = TextHint)
+                                    Text("记录中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PeriodRed)
+                                    Text("第${uiState.cycleDay}天", fontSize = 10.sp, color = TextSecondary)
+                                } else if (uiState.isFirstRecord && !uiState.isInPeriod) {
+                                    Text("周期", fontSize = 8.sp, color = TextHint)
+                                    Text("收集中", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PrimaryPink)
+                                    Text("等待下次记录", fontSize = 10.sp, color = TextSecondary)
+                                } else if (uiState.isInPeriod) {
+                                    Text("预计", fontSize = 8.sp, color = TextHint)
+                                    Text("${uiState.daysUntilPeriodEnd}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PeriodRed)
+                                    Text("天后结束", fontSize = 10.sp, color = TextSecondary)
+                                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
+                                } else {
+                                    Text("预计", fontSize = 8.sp, color = TextHint)
+                                    Text("${uiState.daysUntilNextPeriod}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PrimaryPink)
+                                    Text("天后来", fontSize = 10.sp, color = TextSecondary)
+                                    Text("周期第 ${uiState.cycleDay} 天", fontSize = 8.sp, color = TextHint)
+                                }
+                            } else {
+                                Text("—", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextHint)
+                                Text("记录经期", fontSize = 10.sp, color = TextSecondary)
+                            }
                         }
                     }
                 }
@@ -332,22 +892,33 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 只统计已完成（有结束日期）的记录
+        // 状态卡片：统一渲染，根据模式切换数据（避免if/else重建导致抖动）
         val completedRecords = uiState.records.filter { it.endDate != null }
         val latestCompleted = completedRecords.firstOrNull()
-
+        val card1Title = if (isHealthMode) (if (showPartnerSteps) "${partnerNickname}步数" else "步数") else "周期"
+        val card1Value = if (isHealthMode) "$displaySteps" else (if (latestCompleted != null && !uiState.isFirstRecord) "${latestCompleted.cycleLength}" else "--")
+        val card1Unit = if (isHealthMode) "步" else "天"
+        val card1Color = if (isHealthMode) (if (showPartnerSteps) Color(0xFF4FC3F7) else Color(0xFFFF9800)) else AccentTeal
+        val card2Title = if (isHealthMode) "能量" else "经期"
+        val card2Value = if (isHealthMode) "$displayCalories" else (if (latestCompleted != null) "${latestCompleted.periodLength}" else "--")
+        val card2Unit = if (isHealthMode) "kcal" else "天"
+        val card2Color = if (isHealthMode) Color(0xFFFFC107) else PrimaryPink
+        val card3Title = if (isHealthMode) "运动" else "记录"
+        val card3Value = if (isHealthMode) "$displayExerciseTime" else (if (completedRecords.isNotEmpty()) "${completedRecords.size}" else "--")
+        val card3Unit = if (isHealthMode) "分钟" else "次"
+        val card3Color = if (isHealthMode) Color(0xFF42A5F5) else AccentOrange
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatusCard("周期", if (latestCompleted != null && !uiState.isFirstRecord) "${latestCompleted.cycleLength}" else "--", "天", AccentTeal)
-            StatusCard("经期", if (latestCompleted != null) "${latestCompleted.periodLength}" else "--", "天", PrimaryPink)
-            StatusCard("记录", if (completedRecords.isNotEmpty()) "${completedRecords.size}" else "--", "次", AccentOrange)
+            StatusCard(card1Title, card1Value, card1Unit, card1Color, modifier = Modifier.weight(1f))
+            StatusCard(card2Title, card2Value, card2Unit, card2Color, modifier = Modifier.weight(1f))
+            StatusCard(card3Title, card3Value, card3Unit, card3Color, modifier = Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 小贴士（随机轮播）
+        // 小贴士（随机轮播）- 运动模式下从左往右滑出收起
         var tipIndex by remember { mutableIntStateOf((Math.random() * periodTips.size).toInt()) }
         LaunchedEffect(Unit) {
             while (true) {
@@ -355,50 +926,120 @@ fun HomeScreen(
                 tipIndex = (tipIndex + (1..periodTips.size - 1).random()) % periodTips.size
             }
         }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(containerColor = LightPink),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        AnimatedVisibility(
+            visible = !isHealthMode,
+            enter = slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+            exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) + fadeOut(animationSpec = tween(300))
         ) {
-            Row(
-                modifier = Modifier.padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = LightPink),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.LightbulbCircle,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = PrimaryPink
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                AnimatedContent(
-                    targetState = tipIndex,
-                    transitionSpec = {
-                        (fadeIn() + slideInVertically { it }) togetherWith
-                                (fadeOut() + slideOutVertically { -it })
-                    },
-                    label = "tip"
-                ) { index ->
-                    Text(
-                        text = periodTips[index],
-                        fontSize = 11.sp,
-                        color = TextSecondary
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.LightbulbCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = PrimaryPink
                     )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    AnimatedContent(
+                        targetState = tipIndex,
+                        transitionSpec = {
+                            (fadeIn() + slideInVertically { it }) togetherWith
+                                    (fadeOut() + slideOutVertically { -it })
+                        },
+                        label = "tip"
+                    ) { index ->
+                        Text(
+                            text = periodTips[index],
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 操作按钮 - 仅女性用户显示
+        // ── 运动详情卡片（运动模式下，等月经按钮收起后延迟弹出） ──
+        var showHealthCards by remember { mutableStateOf(false) }
+        // 月经按钮显示状态（等运动卡片收起后再弹出）
+        var showPeriodButtons by remember { mutableStateOf(!isHealthMode) }
+        LaunchedEffect(isHealthMode) {
+            if (isHealthMode) {
+                // 先让月经按钮收起，等收起完再弹运动卡片
+                showPeriodButtons = false
+                delay(450)
+                showHealthCards = true
+            } else {
+                // 先收起运动卡片，等收起完再弹月经按钮
+                showHealthCards = false
+                delay(400)
+                showPeriodButtons = true
+            }
+        }
+        AnimatedVisibility(
+            visible = showHealthCards,
+            enter = expandVertically(expandFrom = Alignment.Top, animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+            exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) + fadeOut(animationSpec = tween(300))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HealthDetailCard(
+                    icon = Icons.Outlined.LocalFireDepartment,
+                    title = if (showPartnerSteps) "${partnerNickname}消耗" else "消耗",
+                    value = "$displayCalories",
+                    unit = "千卡",
+                    subtitle = "≈ ${String.format("%.1f", displayCalories / 100f)} 个香蕉",
+                    color = Color(0xFFFF9800),
+                    onClick = { showExerciseStats = true }
+                )
+                HealthDetailCard(
+                    icon = Icons.Outlined.DirectionsWalk,
+                    title = if (showPartnerSteps) "${partnerNickname}步数" else "步数",
+                    value = "$displaySteps",
+                    unit = "步",
+                    subtitle = if (displaySteps < 3000) "小走几步，身体更健康" else if (displaySteps < 8000) "继续加油，快达标了！" else "太棒了，今日达标！",
+                    color = if (showPartnerSteps) Color(0xFF4FC3F7) else Color(0xFFFF5722),
+                    onClick = { showExerciseStats = true }
+                )
+                HealthDetailCard(
+                    icon = Icons.Outlined.FitnessCenter,
+                    title = if (showPartnerSteps) "${partnerNickname}锻炼" else "锻炼时长",
+                    value = "$displayExerciseTime",
+                    unit = "分钟",
+                    subtitle = if (displayExerciseTime < 15) "坚持运动！离目标更近" else if (displayExerciseTime < 45) "运动中，保持节奏！" else "运动达人！继续保持",
+                    color = Color(0xFF42A5F5),
+                    onClick = { showExerciseStats = true }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 操作按钮 - 仅女性用户显示，运动健康模式下收起（等运动卡片收完再弹）
         val userGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
-        if (userGender == "female") {
+        AnimatedVisibility(
+            visible = showPeriodButtons && userGender == "female",
+            enter = expandVertically(animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+            exit = shrinkVertically(animationSpec = tween(400)) + fadeOut(animationSpec = tween(300))
+        ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -453,8 +1094,13 @@ fun HomeScreen(
                     )
                 }
             }
-        } else if (userGender == "male") {
-            // ── 男性用户：关怀按钮（每天一次）──
+        }
+        // ── 男性用户：关怀按钮（每天一次，运动模式下也隐藏）──
+        AnimatedVisibility(
+            visible = !isHealthMode && userGender == "male",
+            enter = expandVertically(animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+            exit = shrinkVertically(animationSpec = tween(400)) + fadeOut(animationSpec = tween(300))
+        ) {
             val careScope = rememberCoroutineScope()
             Surface(
                 modifier = Modifier
@@ -904,6 +1550,24 @@ fun HomeScreen(
             onSaveSettings = onSaveSettings,
             onSaveMode = onSaveMode
         )
+
+        // ── 运动统计详情页（全屏覆盖层） ──
+        AnimatedVisibility(
+            visible = showExerciseStats,
+            enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(300)) + fadeIn(tween(300)),
+            exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(300)) + fadeOut(tween(200))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Background)
+            ) {
+                ExerciseStatsScreen(
+                    onBack = { showExerciseStats = false },
+                    currentUserId = currentUserId
+                )
+            }
+        }
     } // end Box
 }
 
@@ -1189,6 +1853,11 @@ private fun CycleRing(uiState: PeriodUiState) {
     val outerColor = PeriodRed          // 外圈：经期红
     val innerColor = AccentTeal         // 内圈：周期绿（和底部周期文字一致）
 
+    if (!hasRecord) {
+        // 无记录时不显示圆环背板和进度
+        return
+    }
+
     Canvas(modifier = Modifier.fillMaxSize()) {
         val outerStrokeWidth = 8.dp.toPx()
         val innerStrokeWidth = 6.dp.toPx()
@@ -1251,6 +1920,155 @@ private fun CycleRing(uiState: PeriodUiState) {
     }
 }
 
+// ══════════════════════════════════════════
+// 运动健康三层圆环
+// ══════════════════════════════════════════
+@Composable
+private fun HealthRing(
+    stepsProgress: Float,
+    caloriesProgress: Float,
+    exerciseProgress: Float
+) {
+    val stepsColor = Color(0xFFFF9800)     // 橙色 - 步数（最外圈）
+    val caloriesColor = Color(0xFFFFC107)  // 黄色 - 能量（中间）
+    val exerciseColor = Color(0xFF42A5F5)  // 蓝色 - 运动时间（最内圈）
+
+    val animSteps by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = (stepsProgress.coerceIn(0f, 0.95f)) * 360f,
+        animationSpec = androidx.compose.animation.core.tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "stepsRing"
+    )
+    val animCalories by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = (caloriesProgress.coerceIn(0f, 0.95f)) * 360f,
+        animationSpec = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "caloriesRing"
+    )
+    val animExercise by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = (exerciseProgress.coerceIn(0f, 0.95f)) * 360f,
+        animationSpec = androidx.compose.animation.core.tween(1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "exerciseRing"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val strokeOuter = 7.dp.toPx()
+        val strokeMiddle = 6.dp.toPx()
+        val strokeInner = 5.dp.toPx()
+        val gap = 2.dp.toPx()
+
+        val outerRadius = (size.minDimension - strokeOuter) / 2
+        val middleRadius = outerRadius - strokeOuter / 2 - gap - strokeMiddle / 2
+        val innerRadius = middleRadius - strokeMiddle / 2 - gap - strokeInner / 2
+        val center = Offset(size.width / 2, size.height / 2)
+
+        // ── 外圈背景（步数） ──
+        drawCircle(color = stepsColor.copy(alpha = 0.15f), radius = outerRadius, center = center,
+            style = Stroke(width = strokeOuter, cap = StrokeCap.Round))
+        // ── 中圈背景（能量） ──
+        drawCircle(color = caloriesColor.copy(alpha = 0.15f), radius = middleRadius, center = center,
+            style = Stroke(width = strokeMiddle, cap = StrokeCap.Round))
+        // ── 内圈背景（运动） ──
+        drawCircle(color = exerciseColor.copy(alpha = 0.15f), radius = innerRadius, center = center,
+            style = Stroke(width = strokeInner, cap = StrokeCap.Round))
+
+        // ── 外圈进度（步数） ──
+        if (animSteps > 0f) {
+            drawArc(color = stepsColor, startAngle = -90f, sweepAngle = animSteps, useCenter = false,
+                topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
+                size = Size(outerRadius * 2, outerRadius * 2),
+                style = Stroke(width = strokeOuter, cap = StrokeCap.Round))
+            val a1 = (animSteps - 90f) * (Math.PI / 180.0)
+            drawCircle(Color.White, 5.dp.toPx(), Offset(center.x + outerRadius * cos(a1).toFloat(), center.y + outerRadius * sin(a1).toFloat()))
+            drawCircle(stepsColor, 3.dp.toPx(), Offset(center.x + outerRadius * cos(a1).toFloat(), center.y + outerRadius * sin(a1).toFloat()))
+        }
+
+        // ── 中圈进度（能量） ──
+        if (animCalories > 0f) {
+            drawArc(color = caloriesColor, startAngle = -90f, sweepAngle = animCalories, useCenter = false,
+                topLeft = Offset(center.x - middleRadius, center.y - middleRadius),
+                size = Size(middleRadius * 2, middleRadius * 2),
+                style = Stroke(width = strokeMiddle, cap = StrokeCap.Round))
+            val a2 = (animCalories - 90f) * (Math.PI / 180.0)
+            drawCircle(Color.White, 4.dp.toPx(), Offset(center.x + middleRadius * cos(a2).toFloat(), center.y + middleRadius * sin(a2).toFloat()))
+            drawCircle(caloriesColor, 2.5.dp.toPx(), Offset(center.x + middleRadius * cos(a2).toFloat(), center.y + middleRadius * sin(a2).toFloat()))
+        }
+
+        // ── 内圈进度（运动时间） ──
+        if (animExercise > 0f) {
+            drawArc(color = exerciseColor, startAngle = -90f, sweepAngle = animExercise, useCenter = false,
+                topLeft = Offset(center.x - innerRadius, center.y - innerRadius),
+                size = Size(innerRadius * 2, innerRadius * 2),
+                style = Stroke(width = strokeInner, cap = StrokeCap.Round))
+            val a3 = (animExercise - 90f) * (Math.PI / 180.0)
+            drawCircle(Color.White, 4.dp.toPx(), Offset(center.x + innerRadius * cos(a3).toFloat(), center.y + innerRadius * sin(a3).toFloat()))
+            drawCircle(exerciseColor, 2.5.dp.toPx(), Offset(center.x + innerRadius * cos(a3).toFloat(), center.y + innerRadius * sin(a3).toFloat()))
+        }
+    }
+}
+
+// ══════════════════════════════════════════
+// 运动详情卡片
+// ══════════════════════════════════════════
+@Composable
+private fun HealthDetailCard(
+    icon: ImageVector,
+    title: String,
+    value: String,
+    unit: String,
+    subtitle: String,
+    color: Color,
+    onClick: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+        ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左侧图标
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    tint = color
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            // 右侧信息（文字淡入淡出）
+            Column(modifier = Modifier.weight(1f)) {
+                androidx.compose.animation.Crossfade(targetState = title, animationSpec = tween(250)) { t ->
+                    Text(t, fontSize = 13.sp, color = TextSecondary)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                androidx.compose.animation.Crossfade(targetState = value to unit, animationSpec = tween(250)) { (v, u) ->
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(v, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(u, fontSize = 12.sp, color = TextSecondary, modifier = Modifier.offset(y = (-3).dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                androidx.compose.animation.Crossfade(targetState = subtitle, animationSpec = tween(250)) { s ->
+                    Text(s, fontSize = 11.sp, color = TextHint, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun HomeToolBar(onMenuClick: () -> Unit = {}, onAnnouncementClick: () -> Unit = {}) {
     Surface(
@@ -1291,22 +2109,42 @@ private fun HomeToolBarIcon(icon: ImageVector, isSelected: Boolean, onClick: () 
 }
 
 @Composable
-private fun StatusCard(title: String, value: String, unit: String, color: Color) {
+private fun StatusCard(title: String, value: String, unit: String, color: Color, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier.width(80.dp),
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(10.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(title, fontSize = 10.sp, color = TextSecondary)
+            androidx.compose.animation.Crossfade(targetState = title, animationSpec = tween(250)) { t ->
+                var fs by remember(t) { mutableStateOf(10f) }
+                Text(
+                    t,
+                    fontSize = fs.sp,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    onTextLayout = { result ->
+                        if (result.hasVisualOverflow && fs > 6f) {
+                            fs -= 0.5f
+                        }
+                    }
+                )
+            }
             Spacer(modifier = Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = color)
-                Text(unit, fontSize = 9.sp, color = TextHint, modifier = Modifier.padding(bottom = 1.dp))
+            // 数值淡入淡出
+            androidx.compose.animation.Crossfade(targetState = "$value|$unit" to color, animationSpec = tween(250)) { (vu, c) ->
+                val parts = vu.split("|")
+                Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    Text(parts[0], fontSize = 18.sp, fontWeight = FontWeight.Bold, color = c)
+                    Text(parts.getOrElse(1) { "" }, fontSize = 9.sp, color = TextHint, modifier = Modifier.padding(bottom = 1.dp))
+                }
             }
         }
     }
@@ -1334,6 +2172,7 @@ private fun QuickSettingsDrawer(
 
     // 弹窗状态
     var showNotificationDialog by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
     var showModeDialog by remember { mutableStateOf(false) }
     var showCycleDialog by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
@@ -1500,6 +2339,14 @@ private fun QuickSettingsDrawer(
                     onClick = { showNotificationDialog = true }
                 )
 
+                // 权限管理
+                DrawerSettingItem(
+                    icon = Icons.Outlined.Security,
+                    title = "权限管理",
+                    subtitle = "查看和管理应用权限",
+                    onClick = { showPermissionDialog = true }
+                )
+
                 // 记录模式（男性隐藏）
                 val currentMode = uiState.trackingMode
                 val drawerGender = AuthManager.userState.collectAsState().value?.gender ?: "female"
@@ -1532,11 +2379,13 @@ private fun QuickSettingsDrawer(
     }
 
     // ── 提醒设置弹窗 ──
+    var stepNotificationEnabled by remember { mutableStateOf(settingsPrefs.getBoolean("step_notification", true)) }
+
     if (showNotificationDialog) {
         AlertDialog(
             onDismissRequest = { showNotificationDialog = false },
             containerColor = Color.White,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             icon = {
                 Icon(
                     Icons.Outlined.Notifications,
@@ -1549,30 +2398,120 @@ private fun QuickSettingsDrawer(
                 Text("提醒设置", fontWeight = FontWeight.Bold, color = TextPrimary)
             },
             text = {
-                Text(
-                    if (notificationEnabled) "当前经期提醒已开启，是否关闭？\n关闭后将不再收到经期预测通知。"
-                    else "当前经期提醒已关闭，是否开启？\n开启后将在经期临近时提醒您。",
-                    fontSize = 14.sp,
-                    color = TextSecondary
+                Column {
+                    // 经期提醒开关
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("经期提醒", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("经期临近时推送通知", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        Switch(
+                            checked = notificationEnabled,
+                            onCheckedChange = {
+                                notificationEnabled = it
+                                settingsPrefs.edit().putBoolean("period_notification", it).apply()
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = PrimaryPink)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // 步数通知开关
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("步数通知", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("通知栏显示今日步数", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        Switch(
+                            checked = stepNotificationEnabled,
+                            onCheckedChange = {
+                                stepNotificationEnabled = it
+                                settingsPrefs.edit().putBoolean("step_notification", it).apply()
+                                try {
+                                    if (it) {
+                                        com.laileme.app.service.KeepAliveService.start(context)
+                                    } else {
+                                        com.laileme.app.service.KeepAliveService.stop(context)
+                                    }
+                                } catch (_: Exception) { }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFFFF9800))
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showNotificationDialog = false }) {
+                    Text("完成", color = PrimaryPink, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {}
+        )
+    }
+
+    // ── 权限管理弹窗 ──
+    if (showPermissionDialog) {
+        val permContext = context
+        val hasActivityRecog = android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            androidx.core.content.ContextCompat.checkSelfPermission(permContext, android.Manifest.permission.ACTIVITY_RECOGNITION)
+        val hasNotification = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            android.content.pm.PackageManager.PERMISSION_GRANTED ==
+                androidx.core.content.ContextCompat.checkSelfPermission(permContext, android.Manifest.permission.POST_NOTIFICATIONS)
+        } else true
+        val hasBatterySaver = run {
+            val pm = permContext.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.isIgnoringBatteryOptimizations(permContext.packageName) ?: true
+        }
+        val hasBodySensors = android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            androidx.core.content.ContextCompat.checkSelfPermission(permContext, android.Manifest.permission.BODY_SENSORS)
+
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(
+                    Icons.Outlined.Security,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = AccentTeal
                 )
+            },
+            title = {
+                Text("权限管理", fontWeight = FontWeight.Bold, color = TextPrimary)
+            },
+            text = {
+                Column {
+                    PermissionRow("运动识别", "记录步数和运动数据", hasActivityRecog)
+                    PermissionRow("通知权限", "显示提醒和步数通知", hasNotification)
+                    PermissionRow("电池优化", "后台持续记录步数", hasBatterySaver)
+                    PermissionRow("身体传感器", "读取计步传感器数据", hasBodySensors)
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val newState = !notificationEnabled
-                    settingsPrefs.edit().putBoolean("period_notification", newState).apply()
-                    notificationEnabled = newState
-                    showNotificationDialog = false
+                    // 跳转到应用设置页面
+                    try {
+                        val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = android.net.Uri.parse("package:${permContext.packageName}")
+                        }
+                        permContext.startActivity(intent)
+                    } catch (_: Exception) { }
+                    showPermissionDialog = false
                 }) {
-                    Text(
-                        if (notificationEnabled) "关闭提醒" else "开启提醒",
-                        color = PrimaryPink,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("去设置", color = AccentTeal, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showNotificationDialog = false }) {
-                    Text("取消", color = TextHint)
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text("关闭", color = TextHint)
                 }
             }
         )
@@ -1821,6 +2760,131 @@ private fun DrawerSettingItem(
             modifier = Modifier.size(18.dp),
             tint = TextHint
         )
+    }
+}
+
+@Composable
+private fun PermissionRow(title: String, desc: String, granted: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (granted) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = if (granted) Color(0xFF4CAF50) else Color(0xFFE57373)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+            Text(desc, fontSize = 10.sp, color = TextSecondary)
+        }
+         Text(
+            if (granted) "已授权" else "未授权",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (granted) Color(0xFF4CAF50) else Color(0xFFE57373)
+        )
+    }
+}
+
+// ══════════════════════════════════════════
+// 流星效果
+// ══════════════════════════════════════════
+private data class ShootingStar(
+    val startX: Float, val startY: Float,
+    val angle: Float, // 角度（弧度）
+    val speed: Float, // 速度
+    val length: Float, // 尾巴长度
+    val life: Float, // 总生命周期（秒）
+    val delay: Float, // 延迟出现（秒）
+    val thickness: Float // 粗细
+)
+
+@Composable
+private fun ShootingStarsEffect(modifier: Modifier = Modifier) {
+    val stars = remember {
+        val rng = java.util.Random()
+        List(6) {
+            ShootingStar(
+                startX = rng.nextFloat() * 0.5f + 0.05f, // 从5%-55%宽度出发
+                startY = rng.nextFloat() * 0.25f + 0.05f, // 从顶部5%-30%出发
+                angle = (Math.PI / 5 + rng.nextFloat() * Math.PI / 5).toFloat(), // 36°-72°倾斜
+                speed = 0.5f + rng.nextFloat() * 0.4f,
+                length = 50f + rng.nextFloat() * 80f,
+                life = 0.8f + rng.nextFloat() * 0.6f,
+                delay = rng.nextFloat() * 4f + it * 2f, // 更密集出现
+                thickness = 1.5f + rng.nextFloat() * 2f // 更粗
+            )
+        }
+    }
+
+    var time by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val startTime = System.nanoTime()
+        while (true) {
+            withFrameNanos { frameTime ->
+                time = ((frameTime - startTime) / 1_000_000_000f) % 30f
+            }
+        }
+    }
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        stars.forEach { star ->
+            val cycleTime = star.life + star.delay + 2f
+            val t = (time % cycleTime) - star.delay
+            if (t < 0f || t > star.life) return@forEach
+
+            val progress = t / star.life
+            val alphaRaw = when {
+                progress < 0.2f -> progress / 0.2f
+                progress > 0.7f -> (1f - progress) / 0.3f
+                else -> 1f
+            }
+            val alpha = if (alphaRaw < 0f) 0f else if (alphaRaw > 1f) 1f else alphaRaw
+            val finalAlpha = alpha * 0.8f
+
+            val distance = progress * w * star.speed
+            val cosA = kotlin.math.cos(star.angle.toDouble()).toFloat()
+            val sinA = kotlin.math.sin(star.angle.toDouble()).toFloat()
+            val currentX = star.startX * w + distance * cosA
+            val currentY = star.startY * h + distance * sinA
+            val tailX = currentX - star.length * cosA
+            val tailY = currentY - star.length * sinA
+
+            if (currentX < -50 || currentX > w + 50 || currentY < -50 || currentY > h + 50) return@forEach
+
+            // 流星主体 - 金色渐变尾巴
+            val starColor = Color(0xFFD4A574) // 暖金色
+            drawLine(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        starColor.copy(alpha = finalAlpha),
+                        Color(0xFFE8C9A0).copy(alpha = finalAlpha * 0.5f),
+                        Color.Transparent
+                    ),
+                    start = Offset(currentX, currentY),
+                    end = Offset(tailX, tailY)
+                ),
+                start = Offset(currentX, currentY),
+                end = Offset(tailX, tailY),
+                strokeWidth = star.thickness,
+                cap = StrokeCap.Round
+            )
+
+            // 流星头部亮点
+            drawCircle(
+                color = starColor.copy(alpha = finalAlpha),
+                radius = star.thickness * 1.5f,
+                center = Offset(currentX, currentY)
+            )
+        }
     }
 }
 

@@ -218,7 +218,30 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
+                // 写入伴侣的习惯打卡数据到 discover prefs
+                if (partnerData.habitCheckins.isNotEmpty()) {
+                    val discoverPrefs = getApplication<android.app.Application>()
+                        .getSharedPreferences("laileme_discover", android.content.Context.MODE_PRIVATE)
+                    discoverPrefs.edit()
+                        .putString("partner_habit_checkins", partnerData.habitCheckins)
+                        .putString("partner_habits", partnerData.habits)
+                        .apply()
+                    Log.i("PeriodViewModel", "伴侣习惯打卡数据已保存")
+                }
+
                 Log.i("PeriodViewModel", "伴侣数据同步成功: ${partnerData.periodRecords.size}条经期, ${partnerData.sleepRecords.size}条睡眠")
+            } else if (partnerData != null) {
+                // 没有经期数据但可能有习惯打卡数据
+                if (partnerData.habitCheckins.isNotEmpty()) {
+                    val discoverPrefs = getApplication<android.app.Application>()
+                        .getSharedPreferences("laileme_discover", android.content.Context.MODE_PRIVATE)
+                    discoverPrefs.edit()
+                        .putString("partner_habit_checkins", partnerData.habitCheckins)
+                        .putString("partner_habits", partnerData.habits)
+                        .apply()
+                    Log.i("PeriodViewModel", "伴侣习惯打卡数据已保存（无经期数据）")
+                }
+                Log.i("PeriodViewModel", "伴侣无经期数据")
             } else {
                 Log.i("PeriodViewModel", "伴侣未绑定或无数据")
             }

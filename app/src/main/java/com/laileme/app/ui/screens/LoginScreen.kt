@@ -409,17 +409,23 @@ fun LoginScreen(
                         isLoading = true
                         errorMessage = null
 
-                        if (isLoginMode) {
-                            when (val result = AuthManager.login(username, password)) {
-                                is AuthResult.Success -> onLoginSuccess()
-                                is AuthResult.Error -> errorMessage = result.message
-                            }
+                            if (isLoginMode) {
+                                when (val result = AuthManager.login(username, password)) {
+                                    is AuthResult.Success -> {
+                                        AuthManager.saveAccountCredentials(username, password)
+                                        onLoginSuccess()
+                                    }
+                                    is AuthResult.Error -> errorMessage = result.message
+                                }
                         } else {
                             if (password != confirmPassword) {
                                 errorMessage = "两次密码不一致"
                             } else {
                                 when (val result = AuthManager.register(username, password, nickname, selectedGender)) {
-                                    is AuthResult.Success -> onLoginSuccess()
+                                    is AuthResult.Success -> {
+                                        AuthManager.saveAccountCredentials(username, password)
+                                        onLoginSuccess()
+                                    }
                                     is AuthResult.Error -> errorMessage = result.message
                                 }
                             }

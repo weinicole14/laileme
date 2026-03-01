@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.*
@@ -38,7 +39,10 @@ data class DayInfo(
     val isRecordOvulation: Boolean = false,
     val isPredictOvulation: Boolean = false,
     val isToday: Boolean = false,
-    val isWeekend: Boolean = false
+    val isWeekend: Boolean = false,
+    val lunarText: String = "",
+    val isHoliday: Boolean = false,
+    val hasIntimacy: Boolean = false
 )
 
 private data class PeriodStatus(
@@ -56,7 +60,8 @@ fun CalendarView(
     records: List<PeriodRecord>,
     selectedDate: Long,
     onDateSelected: (Long) -> Unit,
-    onMonthChange: (Int) -> Unit
+    onMonthChange: (Int) -> Unit,
+    intimacyDates: Set<Long> = emptySet()
 ) {
     val monthNames = arrayOf(
         "1月", "2月", "3月", "4月", "5月", "6月",
@@ -135,9 +140,10 @@ fun CalendarView(
             }
         }
 
-        // 日期网格
-        val days = buildDaysInMonth(currentMonth, records)
-        days.chunked(7).forEach { week ->
+        // 日期网格（固定6行，保证每月卡片高度一致）
+        val days = buildDaysInMonth(currentMonth, records, intimacyDates)
+        val paddedDays = days + List((42 - days.size).coerceAtLeast(0)) { DayInfo(null, null) }
+        paddedDays.chunked(7).forEach { week ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -168,9 +174,9 @@ private fun DayCell(
     onDateSelected: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier.aspectRatio(1f).padding(1.dp),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = modifier.padding(1.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (dayInfo.day != null) {
             Box(
@@ -197,18 +203,36 @@ private fun DayCell(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (dayInfo.isToday) "今" else dayInfo.day.toString(),
-                        fontSize = if (dayInfo.isToday) 11.sp else 12.sp,
-                        fontWeight = if (dayInfo.isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = when {
-                            dayInfo.isToday -> Color.White
-                            dayInfo.isWeekend -> WeekendText
-                            else -> TextPrimary
+                    // 顶部标记（数字上方）
+                    if (dayInfo.hasIntimacy && !dayInfo.isToday) {
+                        // 爱心标记：默认大红色，经期重叠时靛蓝爱心+红点
+                        if (dayInfo.isPeriod) {
+                            Box(
+                                modifier = Modifier.size(10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Favorite,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(10.dp),
+                                    tint = Color(0xFF5C6BC0)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(3.dp)
+                                        .clip(CircleShape)
+                                        .background(PeriodRed)
+                                )
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = null,
+                                modifier = Modifier.size(10.dp),
+                                tint = Color(0xFFE53935)
+                            )
                         }
-                    )
-                    // 底部小圆点标记
-                    when {
+                    } else when {
                         dayInfo.isPeriod && !dayInfo.isToday -> Box(
                             modifier = Modifier.size(4.dp).clip(CircleShape).background(PeriodRed)
                         )
@@ -218,17 +242,47 @@ private fun DayCell(
                         dayInfo.isOvulation && !dayInfo.isToday -> Box(
                             modifier = Modifier.size(4.dp).clip(CircleShape).background(OvulationOrange)
                         )
-                        else -> {}
+                        else -> Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    // 日期数字
+                    Text(
+                        text = if (dayInfo.isToday) "今" else dayInfo.day.toString(),
+                        fontSize = if (dayInfo.lunarText.isNotEmpty()) 10.sp else 12.sp,
+                        fontWeight = if (dayInfo.isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = when {
+                            dayInfo.isToday -> Color.White
+                            dayInfo.isWeekend -> WeekendText
+                            else -> TextPrimary
+                        },
+                        lineHeight = 11.sp
+                    )
+                    // 农历/节日小字（框内数字下方）
+                    if (dayInfo.lunarText.isNotEmpty()) {
+                        Text(
+                            text = dayInfo.lunarText,
+                            fontSize = 6.sp,
+                            color = when {
+                                dayInfo.isToday -> Color.White.copy(alpha = 0.85f)
+                                dayInfo.isHoliday -> PeriodRed
+                                else -> TextSecondary
+                            },
+                            fontWeight = if (dayInfo.isHoliday) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            lineHeight = 7.sp
+                        )
                     }
                 }
             }
+        } else {
+            Spacer(modifier = Modifier.size(32.dp))
         }
     }
 }
 
 // ──────────────── 构建月份日期 ────────────────
 
-private fun buildDaysInMonth(calendar: Calendar, records: List<PeriodRecord>): List<DayInfo> {
+private fun buildDaysInMonth(calendar: Calendar, records: List<PeriodRecord>, intimacyDates: Set<Long> = emptySet()): List<DayInfo> {
     val result = mutableListOf<DayInfo>()
     val cal = calendar.clone() as Calendar
 
@@ -248,6 +302,9 @@ private fun buildDaysInMonth(calendar: Calendar, records: List<PeriodRecord>): L
     // 填充月初空白
     repeat(firstDayOffset) { result.add(DayInfo(null, null)) }
 
+    val solarYear = cal.get(Calendar.YEAR)
+    val solarMonth = cal.get(Calendar.MONTH) + 1
+
     for (day in 1..daysInMonth) {
         cal.set(Calendar.DAY_OF_MONTH, day)
         val dateMs = normalizeDate(cal.timeInMillis)
@@ -255,6 +312,7 @@ private fun buildDaysInMonth(calendar: Calendar, records: List<PeriodRecord>): L
         val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
         val isToday = dateMs == todayMs
         val status = calcPeriodStatus(dateMs, records)
+        val lunarInfo = LunarCalendar.getLunarInfo(solarYear, solarMonth, day)
 
         result.add(
             DayInfo(
@@ -265,7 +323,10 @@ private fun buildDaysInMonth(calendar: Calendar, records: List<PeriodRecord>): L
                 isOvulation = status.isOvulation,
                 isFertile = status.isFertile,
                 isToday = isToday,
-                isWeekend = isWeekend
+                isWeekend = isWeekend,
+                lunarText = lunarInfo.lunarText,
+                isHoliday = lunarInfo.isHoliday,
+                hasIntimacy = dateMs in intimacyDates
             )
         )
     }

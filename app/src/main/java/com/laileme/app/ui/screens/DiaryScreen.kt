@@ -1,5 +1,6 @@
 package com.laileme.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,14 +18,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.laileme.app.data.AppDatabase
 import com.laileme.app.data.entity.DiaryEntry
+import com.laileme.app.data.entity.SecretRecord
 import com.laileme.app.ui.PeriodUiState
 import com.laileme.app.ui.normalizeDate
 import com.laileme.app.ui.components.BodyStatusSection
 import com.laileme.app.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -51,6 +57,43 @@ fun DiaryScreen(
 ) {
     val dateFormat = SimpleDateFormat("M月d日 EEEE", Locale.CHINESE)
     val selectedDate = uiState.selectedDate
+
+    // 读取私密记录
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+    val secretRecord by db.secretDao().getRecordByDate(selectedDate).collectAsState(initial = null)
+    val coroutineScope = rememberCoroutineScope()
+
+    // 未成年模式判断
+    val settingsPrefs = remember { context.getSharedPreferences("laileme_settings", android.content.Context.MODE_PRIVATE) }
+    val profilePrefs = remember { context.getSharedPreferences("laileme_profile", android.content.Context.MODE_PRIVATE) }
+    val isMinorMode = remember {
+        val hasManualSet = settingsPrefs.contains("minor_mode")
+        if (hasManualSet) {
+            settingsPrefs.getBoolean("minor_mode", false)
+        } else {
+            try {
+                val y = profilePrefs.getString("birth_year", "")?.toIntOrNull()
+                val m = profilePrefs.getString("birth_month", "")?.toIntOrNull()
+                val d = profilePrefs.getString("birth_day", "")?.toIntOrNull()
+                if (y != null && m != null && d != null) {
+                    val now = java.util.Calendar.getInstance()
+                    var age = now.get(java.util.Calendar.YEAR) - y
+                    if (now.get(java.util.Calendar.MONTH) + 1 < m ||
+                        (now.get(java.util.Calendar.MONTH) + 1 == m && now.get(java.util.Calendar.DAY_OF_MONTH) < d)) {
+                        age--
+                    }
+                    age < 18
+                } else false
+            } catch (_: Exception) { false }
+        }
+    }
+
+    // 爱爱相关状态
+    var hadSex by remember(selectedDate, secretRecord) { mutableStateOf(secretRecord?.hadSex ?: false) }
+    var protection by remember(selectedDate, secretRecord) { mutableStateOf(secretRecord?.protection ?: "") }
+    var feeling by remember(selectedDate, secretRecord) { mutableIntStateOf(secretRecord?.feeling ?: 0) }
+    var showProtectionWarning by remember { mutableStateOf(false) }
 
     // 所有状态
     var mood by remember(selectedDate) { mutableStateOf(diaryEntry?.mood ?: "") }
@@ -81,6 +124,34 @@ fun DiaryScreen(
             kotlinx.coroutines.delay(1500)
             showSavedTip = false
         }
+    }
+
+    // 暖心提醒弹窗
+    if (showProtectionWarning) {
+        AlertDialog(
+            onDismissRequest = { showProtectionWarning = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text("暖心提醒(｡♥‿♥｡)", color = PrimaryPink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Text(
+                    "女孩子一定要保护好自己哦！不要轻易相信别人，任何时候都要把自己的安全和健康放在第一位。\n\n宝贝，你真的准备好了吗？",
+                    fontSize = 14.sp, color = TextPrimary, lineHeight = 22.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { hadSex = true; showProtectionWarning = false }) {
+                    Text("我准备好了", color = PrimaryPink, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showProtectionWarning = false }) {
+                    Text("我再想想", color = TextSecondary)
+                }
+            }
+        )
     }
 
     Column(
@@ -292,6 +363,115 @@ fun DiaryScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // ── 爱爱记录卡片（未成年模式下隐藏） ──
+            if (!isMinorMode) Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    // 爱爱开关
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Favorite, "爱爱", tint = Color(0xFFE53935), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("亲密记录", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        }
+                        Switch(
+                            checked = hadSex,
+                            onCheckedChange = { checked ->
+                                if (checked && !hadSex) {
+                                    showProtectionWarning = true
+                                } else {
+                                    hadSex = checked
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFFE53935)
+                            )
+                        )
+                    }
+
+                    AnimatedVisibility(visible = hadSex) {
+                        Column {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("避孕方式", fontSize = 12.sp, color = TextSecondary)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val protections = listOf(
+                                "" to "未记录", "none" to "无避孕", "condom" to "安全套",
+                                "pill" to "避孕药", "safe_period" to "安全期体外", "other" to "其他"
+                            )
+                            @OptIn(ExperimentalLayoutApi::class)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                protections.forEach { (key, label) ->
+                                    val isSel = protection == key
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSel) Color(0xFFE53935) else Color(0xFFF5F5F5),
+                                        modifier = Modifier.clickable { protection = key }
+                                    ) {
+                                        Text(
+                                            label, fontSize = 11.sp,
+                                            color = if (isSel) Color.White else TextPrimary,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 温馨提示
+                            val protectionTip = when (protection) {
+                                "safe_period" -> "⚠ 安全期和体外并不安全哦，失败率较高，建议搭配其他避孕方式~"
+                                "none" -> "⚠ 宝贝请一定要做好保护措施，爱自己才能更好地爱别人哦！"
+                                "condom" -> "💕 记得使用前检查好有没有破损哦，注意全程佩戴~"
+                                "pill" -> "💊 记得按时吃药哦，不要漏服，注意身体反应~"
+                                else -> null
+                            }
+                            AnimatedVisibility(visible = protectionTip != null) {
+                                Text(
+                                    protectionTip ?: "",
+                                    fontSize = 11.sp,
+                                    color = if (protection == "safe_period" || protection == "none") Color(0xFFE57373) else PrimaryPink,
+                                    lineHeight = 16.sp,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("愉悦度", fontSize = 12.sp, color = TextSecondary)
+                            Row(modifier = Modifier.padding(top = 6.dp)) {
+                                for (i in 1..5) {
+                            Icon(
+                                if (i <= feeling) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = "星级 $i",
+                                tint = if (i <= feeling) Color(0xFFE53935) else Color.LightGray,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clickable(
+                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        indication = null
+                                    ) { feeling = i }
+                                            .padding(2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             // ── 日记卡片 ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -338,6 +518,7 @@ fun DiaryScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             // ── 保存按钮 ──
+            val hasIntimacyContent = hadSex
             Button(
                 onClick = {
                     onSaveDiary(
@@ -359,6 +540,24 @@ fun DiaryScreen(
                             discharge = discharge
                         )
                     )
+                    // 同时保存爱爱记录
+                    coroutineScope.launch {
+                        if (hadSex) {
+                            db.secretDao().insert(
+                                SecretRecord(
+                                    date = selectedDate,
+                                    hadSex = true,
+                                    protection = protection,
+                                    feeling = feeling,
+                                    mood = secretRecord?.mood ?: "",
+                                    notes = secretRecord?.notes ?: ""
+                                )
+                            )
+                        } else if (secretRecord != null) {
+                            // 关闭了爱爱但之前有记录，更新hadSex为false
+                            db.secretDao().insert(secretRecord!!.copy(hadSex = false))
+                        }
+                    }
                     showSavedTip = true
                 },
                 modifier = Modifier
@@ -366,7 +565,7 @@ fun DiaryScreen(
                     .height(46.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryPink),
-                enabled = hasContent
+                enabled = hasContent || hasIntimacyContent
             ) {
                 Icon(
                     imageVector = if (diaryEntry != null) Icons.Outlined.Edit else Icons.Outlined.Save,

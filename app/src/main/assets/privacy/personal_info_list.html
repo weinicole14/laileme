@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <title>个人信息收集清单</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 16px; margin: 0; color: #333; font-size: 14px; }
+        h1 { font-size: 18px; text-align: center; }
+        p { margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; font-weight: bold; }
+        .help-text { font-size: 12px; color: #666; margin-top: 24px; padding: 12px; background-color: #f9f9f9; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>个人信息收集清单</h1>
+    <p>根据《个人信息保护法》相关规定，我们将在此公示本应用收集的个人信息详情：</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>信息类型</th>
+                <th>用途</th>
+                <th>必要性</th>
+                <th>存储方式</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>用户名</td><td>账号注册与登录</td><td>必要</td><td>服务器加密存储</td></tr>
+            <tr><td>密码</td><td>账号安全验证</td><td>必要</td><td>BCrypt加密存储</td></tr>
+            <tr><td>昵称</td><td>个性化显示</td><td>可选</td><td>服务器存储</td></tr>
+            <tr><td>生日</td><td>年龄计算</td><td>可选</td><td>本地存储</td></tr>
+            <tr><td>身高/体重</td><td>BMI计算</td><td>可选</td><td>本地存储</td></tr>
+            <tr><td>血型</td><td>健康档案</td><td>可选</td><td>本地存储</td></tr>
+            <tr><td>经期记录</td><td>周期预测与统计</td><td>核心功能</td><td>本地数据库</td></tr>
+            <tr><td>睡眠记录</td><td>睡眠分析与统计</td><td>核心功能</td><td>本地数据库</td></tr>
+            <tr><td>日记内容</td><td>心情记录</td><td>可选</td><td>本地数据库</td></tr>
+            <tr><td>设备信息</td><td>问题排查与适配</td><td>自动收集</td><td>不上传</td></tr>
+            <tr><td>反馈内容</td><td>改进产品服务</td><td>用户主动提交</td><td>服务器存储</td></tr>
+        </tbody>
+    </table>
+
+    <div class="help-text">
+        <p style="margin-bottom:6px;"><strong>说明：</strong></p>
+        <p style="margin-bottom:4px;">1. 标注「必要」的信息为提供基础服务所需，拒绝提供将无法使用相关功能。</p>
+        <p style="margin-bottom:4px;">2. 标注「可选」的信息用于提升体验，不提供不影响核心功能使用。</p>
+        <p style="margin-bottom:4px;">3. 本地存储的数据不会上传至服务器，仅保存在你的设备中。</p>
+        <p style="margin-bottom:0;">4. 密码采用BCrypt单向加密，任何人（包括我们）均无法查看明文密码。</p>
+    </div>
+</body>
+</html>
